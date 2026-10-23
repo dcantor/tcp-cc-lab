@@ -1,0 +1,5 @@
+<network>
+  <name>tcpcc-oob</name>
+  <bridge name='virbr-tccoob' stp='off' delay='0'/>
+  <ip address='10.14.0.1' netmask='255.255.255.0'/>
+</network>

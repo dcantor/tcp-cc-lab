@@ -1,0 +1,4 @@
+<network>
+  <name>tcpcc-lan-a</name>
+  <bridge name='virbr-tcclana' stp='off' delay='0'/>
+</network>

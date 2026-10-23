@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tcp-cc-lab portal</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M3 24 C10 24 10 8 16 8 S22 20 29 14' stroke='%232a78d6' stroke-width='3' fill='none'/%3E%3Cpath d='M3 26 H29' stroke='%23eb6834' stroke-width='3'/%3E%3C/svg%3E">
+<style>
+:root { --bg:#f6f7f9; --panel:#fcfcfb; --ink:#1f2937; --mute:#52514e; --line:#e5e7eb; --edge:#cbd5e1; --grid:#ecebe7;
+  --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --accent:#2563eb; --code:#f3f4f6;
+  --cubic:#2a78d6; --bbr:#eb6834; --reno:#1baf7a; --wire:#94a3b8; --wanbg:#fff4e5; --wan:#b45309; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0f141b; --panel:#1a1a19; --ink:#f0efec; --mute:#c3c2b7;
+  --line:#2c2c2a; --edge:#3f3f3c; --grid:#2a2a28; --ok:#22c55e; --warn:#f59e0b; --bad:#f87171; --accent:#60a5fa; --code:#121211;
+  --cubic:#3987e5; --bbr:#d95926; --reno:#199e70; --wire:#57534e; --wanbg:#2b2114; --wan:#f59e0b; } }
+:root[data-theme="dark"] { --bg:#0f141b; --panel:#1a1a19; --ink:#f0efec; --mute:#c3c2b7; --line:#2c2c2a; --edge:#3f3f3c; --grid:#2a2a28;
+  --ok:#22c55e; --warn:#f59e0b; --bad:#f87171; --accent:#60a5fa; --code:#121211;
+  --cubic:#3987e5; --bbr:#d95926; --reno:#199e70; --wire:#57534e; --wanbg:#2b2114; --wan:#f59e0b; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display:flex; align-items:center; gap:12px; padding:12px 16px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+header h1 { font-size:16px; margin:0; } header .sub { color:var(--mute); } header .right { margin-left:auto; color:var(--mute); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+a { color:var(--accent); }
+main { display:grid; grid-template-columns: minmax(0, 1fr) 420px; gap:16px; padding:16px; max-width:1500px; margin:0 auto; }
+@media (max-width: 1150px) { main { grid-template-columns: minmax(0, 1fr); } }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:0; }
+.card h2 { font-size:14px; margin:0 0 10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; } .card h2 .end { margin-left:auto; }
+.stack > * + * { margin-top:16px; }
+.pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--mute); white-space:nowrap; }
+.pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.accent { color:var(--accent); border-color:var(--accent); }
+.mute { color:var(--mute); } .small { font-size:12px; } .bad { color:var(--bad); } .okc { color:var(--ok); }
+table { border-collapse:collapse; width:100%; font-size:13px; } th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--mute); font-weight:500; } td.num, th.num { text-align:right; font-variant-numeric: tabular-nums; white-space:nowrap; }
+pre { background:var(--code); border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; max-height:280px; font-size:12px; margin:8px 0 0; white-space:pre-wrap; }
+button, select, input[type=number] { font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--edge); border-radius:6px; padding:5px 10px; }
+input[type=number] { width:84px; padding:4px 6px; }
+button { cursor:pointer; } button.primary { background:var(--accent); border-color:var(--accent); color:#fff; } button:disabled { opacity:.5; cursor:default; }
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.seg { display:inline-flex; border:1px solid var(--edge); border-radius:6px; overflow:hidden; } .seg button { border:0; border-radius:0; border-right:1px solid var(--edge); padding:4px 10px; font-size:13px; }
+.seg button:last-child { border-right:0; } .seg button.on { background:var(--accent); color:#fff; }
+.steps { list-style:none; padding:0; margin:6px 0 0; } .steps li { padding:2px 0; } .steps .st { display:inline-block; width:62px; }
+.st.success { color:var(--ok); } .st.failed { color:var(--bad); } .st.running { color:var(--accent); } .st.pending, .st.skipped { color:var(--mute); }
+code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+svg { display:block; width:100%; height:auto; }
+svg text { fill:var(--ink); font-size:12px; } svg .sm { fill:var(--mute); font-size:11px; } svg .b { font-weight:600; }
+svg .box { fill:var(--panel); stroke:var(--edge); stroke-width:1.5; } svg .box.wan { fill:var(--wanbg); stroke:var(--wan); } svg .box.down { stroke:var(--bad); stroke-dasharray:4 3; }
+svg .wire { stroke:var(--wire); stroke-width:2; fill:none; }
+/* the slider */
+.ctl { display:grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap:10px 14px; align-items:center; }
+@media (max-width: 600px) { .ctl { grid-template-columns: minmax(0, 1fr) auto; } .ctl > label { grid-column: 1 / -1; margin-bottom:-6px; } }
+.ctl label { color:var(--mute); }
+input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
+.big { font-size:22px; font-weight:600; font-variant-numeric: tabular-nums; } .big small { font-size:13px; font-weight:400; color:var(--mute); }
+.kpis { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:10px; margin-top:12px; }
+@media (max-width: 700px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.kpi { border:1px solid var(--line); border-radius:8px; padding:8px 10px; } .kpi b { display:block; font-size:12px; font-weight:500; color:var(--mute); } .kpi span { font-size:17px; font-variant-numeric: tabular-nums; }
+/* charts */
+.chart { position:relative; } .chart svg .grid { stroke:var(--grid); stroke-width:1; } .chart svg .axis { fill:var(--mute); font-size:11px; }
+.chart svg .series { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.chart svg .mark { stroke:var(--mute); stroke-dasharray:3 3; stroke-width:1; } .chart svg .marklbl { fill:var(--mute); font-size:11px; }
+.chart svg .cross { stroke:var(--mute); stroke-width:1; }
+.chart svg .dot { stroke:var(--panel); stroke-width:2; }
+.tip { position:absolute; pointer-events:none; background:var(--panel); border:1px solid var(--edge); border-radius:6px; padding:6px 8px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.15); display:none; white-space:nowrap; z-index:2; }
+.tip i, .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px; }
+.legend { display:flex; gap:16px; flex-wrap:wrap; color:var(--ink); font-size:12px; margin:4px 0 6px; }
+.charts { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:14px; } @media (max-width: 900px) { .charts { grid-template-columns: minmax(0, 1fr); } }
+.charts h3 { font-size:13px; margin:0 0 2px; font-weight:600; } .charts h3 span { font-weight:400; color:var(--mute); }
+.sw { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
+.scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>tcp-cc-lab</h1><span class="sub">TCP congestion control (CUBIC, BBR, Reno) across an emulated WAN</span>
+  <span class="pill" id="ver"></span>
+  <div class="right">
+    <span id="upPill" class="pill">…</span><span id="busyPill" class="pill accent" style="display:none">run going</span>
+    <a href="/docs">API</a><a id="hubLink">Lab Hub</a>
+  </div>
+</header>
+<main>
+  <div class="stack">
+    <section class="card">
+      <h2>WAN emulator <span class="mute small">— wanem: netem delay (RTT ÷ 2 each way) then a tbf bottleneck, both directions</span></h2>
+      <div class="ctl">
+        <label for="rtt">Round-trip time</label>
+        <input type="range" id="rtt" min="0" max="300" step="1" value="30" list="rttTicks" aria-describedby="rttVal">
+        <div class="big" id="rttVal">30 ms <small>15 + 15</small></div>
+        <label for="rate">Bottleneck rate</label>
+        <div class="row"><select id="rate"><option>10</option><option>20</option><option>50</option><option selected>100</option><option>200</option><option>500</option><option>1000</option></select><span class="mute">Mbit/s</span></div>
+        <div></div>
+        <label for="loss">Random loss</label>
+        <input type="range" id="loss" min="0" max="5" step="0.1" value="0">
+        <div class="big" id="lossVal">0 % <small>each way</small></div>
+        <label>Bottleneck buffer</label>
+        <div class="row"><span class="seg" id="bufSeg"><button data-b="0.25">¼ BDP</button><button data-b="1" class="on">1 BDP</button><button data-b="4">4 BDP</button><button data-b="16">16 BDP</button></span><span class="mute small" id="bufBytes"></span></div>
+        <div></div>
+      </div>
+      <datalist id="rttTicks"><option value="0"></option><option value="30"></option><option value="100"></option><option value="200"></option><option value="300"></option></datalist>
+      <div class="row" style="margin-top:10px">
+        <button id="resetBtn">Defaults (30 ms, 100 Mbit/s)</button>
+        <button id="pingBtn">Measure RTT</button><span id="pingOut" class="mute small"></span>
+        <span id="wanMsg" class="small" style="margin-left:auto"></span>
+      </div>
+      <div class="kpis" aria-live="polite">
+        <div class="kpi"><b>A → B through the bottleneck</b><span id="kThr">–</span></div>
+        <div class="kpi"><b>Queue at the bottleneck (A → B)</b><span id="kQ">–</span></div>
+        <div class="kpi"><b>Bottleneck drops (A → B)</b><span id="kDrop">–</span></div>
+        <div class="kpi"><b>B → A (acks, or B senders)</b><span id="kThrB">–</span></div>
+      </div>
+      <p class="mute small" style="margin:10px 0 0">Changes apply when you let go of the slider, in place (<code>tc qdisc change</code>): a running flow sees the new RTT on its next packets and keeps going. The VMs add about 1 ms of their own on top of the emulated RTT.</p>
+    </section>
+
+    <section class="card">
+      <h2>Flows <span class="mute small" id="flowsSub">— one TCP flow per algorithm, each site A host to its site B peer (iperf3)</span></h2>
+      <div class="row">
+        <span class="seg" id="modeSeg"><button data-m="compete" class="on">Compete (all at once)</button><button data-m="solo">Solo (one at a time)</button></span>
+        <label class="mute small" for="dur">duration</label><select id="dur"><option value="20">20 s</option><option value="30" selected>30 s</option><option value="60">60 s</option><option value="120">120 s</option></select>
+        <label class="mute small" for="dir">direction</label><select id="dir"><option value="a2b">site A → B</option><option value="b2a">site B → A</option></select>
+        <label class="mute small" for="stag">start</label><select id="stag"><option value="0">together</option><option value="5">5 s apart</option><option value="10">10 s apart</option></select>
+        <span class="row small" id="algoPick"></span>
+        <button class="primary" id="goBtn">Start</button>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="charts">
+        <div><h3>Throughput <span>Mbit/s, per second</span></h3><div class="chart" id="cThr"></div></div>
+        <div><h3>RTT the sender sees <span>ms (smoothed RTT, TCP_INFO)</span></h3><div class="chart" id="cRtt"></div></div>
+      </div>
+      <div id="flowRes" style="margin-top:12px"></div>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <h2>Topology</h2>
+      <div class="scroll"><svg id="topo" viewBox="0 0 400 250" aria-label="topology" style="min-width:360px"></svg></div>
+    </section>
+    <section class="card">
+      <h2>Hosts</h2>
+      <table id="hosts"></table>
+    </section>
+    <section class="card">
+      <h2>Verify and tests <span class="end row"><button id="verifyBtn">Verify</button><button id="testBtn">Run tests</button></span></h2>
+      <div id="tests" class="small"></div>
+    </section>
+    <section class="card">
+      <h2>Run</h2>
+      <div id="run" class="small"><span class="mute">No run started from this page yet.</span></div>
+      <h2 style="margin-top:14px">Recent runs</h2>
+      <table id="runs" class="small"></table>
+    </section>
+  </div>
+</main>
+<div class="tip" id="tip"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+async function api(p) { const r = await fetch(p); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText); return r.json(); }
+async function post(p, b) { const r = await fetch(p, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b)});
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText); return r.json(); }
+const ALGOS = ['cubic', 'bbr', 'reno'];
+const LABEL = {cubic: 'CUBIC', bbr: 'BBR', reno: 'Reno'};
+const color = a => `var(--${a})`;
+let LAB = null, STATE = null, RUN = null, runSince = 0, MODE = 'compete', BUF = 1, lastWan = null, chartData = null;
+
+// ---- charts (one axis each, crosshair + tooltip) ---------------------------------------------------------------------
+function lineChart(el, series, opt) {
+  // series: {algo: [[x, y], ...]}; opt: {unit, marks: [{x, label}], xmax}
+  const W = 520, H = 230, L = 40, R = 12, T = 12, B = 26;
+  const pts = Object.values(series).flat();
+  const xmax = Math.max(opt.xmax || 0, ...pts.map(p => p[0]), 10);
+  let ymax = Math.max(...pts.map(p => p[1]), opt.ymin || 1); ymax = niceMax(ymax);
+  const x = v => L + (v / xmax) * (W - L - R), y = v => T + (1 - v / ymax) * (H - T - B);
+  const yt = [0, .25, .5, .75, 1].map(f => f * ymax), xt = ticks(xmax);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opt.aria)}">`;
+  s += yt.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`).join('');
+  s += xt.map(v => `<text class="axis" x="${x(v)}" y="${H - 8}" text-anchor="middle">${v}s</text>`).join('');
+  for (const m of opt.marks || []) s += `<line class="mark" x1="${x(m.x)}" x2="${x(m.x)}" y1="${T}" y2="${H - B}"/><text class="marklbl" x="${x(m.x) + 4}" y="${T + 10}">${esc(m.label)}</text>`;
+  const lbl = [];
+  for (const a of ALGOS) {
+    const p = series[a]; if (!p || !p.length) continue;
+    s += `<path class="series" stroke="${color(a)}" d="${p.map((q, i) => (i ? 'L' : 'M') + x(q[0]).toFixed(1) + ' ' + y(q[1]).toFixed(1)).join('')}"/>`;
+    const last = p[p.length - 1]; lbl.push({a, x: Math.min(x(last[0]) + 4, W - R - 34), y: y(last[1]) - 6});
+  }
+  lbl.sort((m, n) => m.y - n.y);   // direct labels at the lines' ends, pushed apart so they never overlap
+  for (let i = 0; i < lbl.length; i++) lbl[i].y = Math.max(lbl[i].y, i ? lbl[i - 1].y + 12 : T + 10);
+  for (let i = lbl.length - 1; i >= 0; i--) lbl[i].y = Math.min(lbl[i].y, i < lbl.length - 1 ? lbl[i + 1].y - 12 : H - B - 2);
+  s += lbl.map(l => `<text x="${l.x}" y="${l.y}" class="sm b">${LABEL[l.a]}</text>`).join('');
+  s += `<line class="cross" id="${el.id}X" y1="${T}" y2="${H - B}" style="display:none"/>`;
+  s += ALGOS.map(a => `<circle class="dot" id="${el.id}D${a}" r="4.5" fill="${color(a)}" style="display:none"/>`).join('');
+  s += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" class="hit"/></svg>`;
+  el.innerHTML = s;
+  const svg = el.querySelector('svg'), hit = el.querySelector('.hit'), tip = $('#tip');
+  const move = ev => {
+    const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width;
+    const xv = Math.max(0, Math.min(xmax, (px - L) / (W - L - R) * xmax));
+    const rows = [];
+    let xs = null;
+    for (const a of ALGOS) {
+      const p = series[a], d = el.querySelector(`#${el.id}D${a}`); if (!p || !p.length) { d.style.display = 'none'; continue; }
+      const q = p.reduce((b, c) => Math.abs(c[0] - xv) < Math.abs(b[0] - xv) ? c : b);
+      if (Math.abs(q[0] - xv) > 2.5) { d.style.display = 'none'; continue; }
+      xs = xs ?? q[0]; d.setAttribute('cx', x(q[0])); d.setAttribute('cy', y(q[1])); d.style.display = '';
+      rows.push(`<div><i style="background:${color(a)}"></i>${LABEL[a]} <b>${fmt(q[1])}</b> ${opt.unit}</div>`);
+    }
+    const cx = el.querySelector(`#${el.id}X`);
+    if (!rows.length) { tip.style.display = 'none'; cx.style.display = 'none'; return; }
+    cx.setAttribute('x1', x(xs)); cx.setAttribute('x2', x(xs)); cx.style.display = '';
+    tip.innerHTML = `<div class="mute">t = ${xs} s</div>` + rows.join('');
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth; let left = ev.pageX + 14; if (left + tw > window.scrollX + document.documentElement.clientWidth - 8) left = ev.pageX - tw - 14;
+    tip.style.left = left + 'px'; tip.style.top = (ev.pageY - 10) + 'px';
+  };
+  hit.addEventListener('pointermove', move);
+  hit.addEventListener('pointerleave', () => { tip.style.display = 'none'; el.querySelector(`#${el.id}X`).style.display = 'none'; ALGOS.forEach(a => el.querySelector(`#${el.id}D${a}`).style.display = 'none'); });
+}
+const niceMax = v => { const e = Math.pow(10, Math.floor(Math.log10(v))); for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * e >= v) return m * e; return 10 * e; };
+const ticks = m => { const st = [5, 10, 15, 20, 30, 60].find(s => m / s <= 7) || 120; const out = []; for (let v = 0; v <= m; v += st) out.push(v); return out; };
+const fmt = v => v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(1).replace(/\.0$/, '') : (+v.toFixed(2)).toString();
+
+function drawCharts() {
+  const d = chartData || {samples: [], marks: []};
+  const t0 = d.samples.length ? Math.min(...d.samples.map(s => s.ts)) - 1 : 0;
+  const thr = {}, rtt = {};
+  for (const s of d.samples) { const t = Math.round((s.ts - t0) * 10) / 10; (thr[s.cc] ||= []).push([t, s.mbps]); if (s.rtt_ms) (rtt[s.cc] ||= []).push([t, s.rtt_ms]); }
+  const marks = (d.marks || []).filter(m => t0).map(m => ({x: Math.max(0, m.ts - t0), label: `RTT ${m.rtt_ms} ms` + (m.rate_mbit != lastRate(d, m) ? `, ${m.rate_mbit} Mbit/s` : '')}));
+  const xmax = d.duration || 30;
+  lineChart($('#cThr'), thr, {unit: 'Mbit/s', marks, xmax, aria: 'throughput per algorithm over time'});
+  lineChart($('#cRtt'), rtt, {unit: 'ms', marks, xmax, ymin: 10, aria: 'round-trip time per algorithm over time'});
+  $('#legend').innerHTML = (d.algos || ALGOS).map(a => `<span><i style="background:${color(a)}"></i>${LABEL[a]} <span class="mute">(${d.direction === 'b2a' ? 'b' : 'a'}-${a})</span></span>`).join('');
+}
+const lastRate = (d, m) => { const i = d.marks.indexOf(m); return i > 0 ? d.marks[i - 1].rate_mbit : d.rate0; };
+
+function flowTable(r) {
+  if (!r) return '';
+  const tot = r.flows.reduce((a, f) => a + f.mbps, 0) || 1;
+  const rows = r.flows.map(f => `<tr><td><span class="sw" style="background:${color(f.cc)}"></span>${LABEL[f.cc]}${f.cc_reported && f.cc_reported !== f.cc ? ` <span class="bad">(kernel said ${esc(f.cc_reported)})</span>` : ''}</td><td class="mono">${esc(f.host)}</td>
+    <td class="num">${f.mbps}</td><td class="num">${r.mode === 'compete' ? Math.round(100 * f.mbps / tot) + ' %' : '–'}</td><td class="num">${f.retransmits}</td>
+    <td class="num">${f.rtt_ms.min}</td><td class="num">${f.rtt_ms.mean}</td><td class="num">${f.rtt_ms.max}</td><td class="bad small">${esc(f.error || '')}</td></tr>`).join('');
+  const w = r.wan;
+  return `<div class="small mute">${r.mode === 'compete' ? 'All at once' : 'One at a time'}, ${r.duration} s${r.mode === 'compete' ? ' each' : ' per algorithm'}, site ${r.direction === 'a2b' ? 'A → B' : 'B → A'}; WAN at the start: RTT ${w.rtt_ms} ms, ${w.rate_mbit} Mbit/s, loss ${w.loss_pct} %, buffer ${w.buffer_bdp} × BDP</div>
+    <div class="scroll"><table><tr><th>Algorithm</th><th>Sender</th><th class="num">Mbit/s</th><th class="num">Share</th><th class="num">Retransmits</th><th class="num">RTT min</th><th class="num">mean</th><th class="num">max (ms)</th><th></th></tr>${rows}</table></div>
+    ${r.mode === 'compete' ? `<div class="small" style="margin-top:6px">Total <b>${r.total_mbps}</b> Mbit/s · Jain fairness <b>${r.jain_fairness}</b> (1 = equal shares, ${(1 / r.flows.length).toFixed(2)} = one flow takes all) · bottleneck drops <b>${r.bottleneck.drops}</b></div>` : ''}`;
+}
+
+// ---- WAN controls --------------------------------------------------------------------------------------------------
+function showRtt(v) { $('#rttVal').innerHTML = `${v} ms <small>${+(v / 2).toFixed(1)} + ${+(v / 2).toFixed(1)}</small>`; }
+function showLoss(v) { $('#lossVal').innerHTML = `${(+v).toFixed(1).replace(/\.0$/, '')} % <small>each way</small>`; }
+function syncControls(s) {
+  if (!s || document.activeElement === $('#rtt') && $('#rtt').dataset.drag) return;
+  $('#rtt').value = s.rtt_ms; showRtt(s.rtt_ms); $('#loss').value = s.loss_pct; showLoss(s.loss_pct);
+  const r = String(s.rate_mbit); if (![...$('#rate').options].some(o => o.value === r)) $('#rate').add(new Option(r, r)); $('#rate').value = r;
+  BUF = s.buffer_bdp; document.querySelectorAll('#bufSeg button').forEach(b => b.classList.toggle('on', +b.dataset.b === +BUF));
+  $('#bufBytes').textContent = `= ${(s.queue_bytes / 1000).toFixed(0)} kB (${(s.queue_bytes * 8 / (s.rate_mbit * 1000)).toFixed(1)} ms at ${s.rate_mbit} Mbit/s)`;
+}
+async function applyWan(body) {
+  $('#wanMsg').textContent = 'applying…';
+  try { const v = await post('/api/wan', body); syncControls(v.settings); $('#wanMsg').innerHTML = '<span class="okc">applied</span>' + (RUN && RUN.status === 'running' ? ' — marked on the chart' : ''); }
+  catch (e) { $('#wanMsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+$('#rtt').addEventListener('input', e => { e.target.dataset.drag = 1; showRtt(e.target.value); });
+$('#rtt').addEventListener('change', e => { delete e.target.dataset.drag; applyWan({rtt_ms: +e.target.value}); });
+$('#loss').addEventListener('input', e => showLoss(e.target.value));
+$('#loss').addEventListener('change', e => applyWan({loss_pct: +e.target.value}));
+$('#rate').addEventListener('change', e => applyWan({rate_mbit: +e.target.value}));
+document.querySelectorAll('#bufSeg button').forEach(b => b.onclick = () => applyWan({buffer_bdp: +b.dataset.b}));
+$('#resetBtn').onclick = () => applyWan({reset: true});
+$('#pingBtn').onclick = async () => { $('#pingOut').textContent = 'pinging…';
+  try { const r = await post('/api/rtt', {}); $('#pingOut').textContent = `a-cubic → b-cubic: min ${r.min_ms} / avg ${r.avg_ms} / max ${r.max_ms} ms`; }
+  catch (e) { $('#pingOut').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } };
+
+async function pollWan() {
+  try {
+    const w = await api('/api/wan');
+    if (!w.error) {
+      if (lastWan && w.at > lastWan.at) {
+        const dt = w.at - lastWan.at, rate = d => ((w[d].bytes - lastWan[d].bytes) * 8 / dt / 1e6);
+        $('#kThr').textContent = `${fmt(Math.max(0, rate('a2b')))} Mbit/s`; $('#kThrB').textContent = `${fmt(Math.max(0, rate('b2a')))} Mbit/s`;
+        $('#kDrop').textContent = `${Math.max(0, Math.round((w.a2b.drops - lastWan.a2b.drops) / dt))} /s · ${w.a2b.drops} total`;
+      }
+      const qms = w.a2b.backlog_bytes * 8 / (w.settings.rate_mbit * 1000);
+      $('#kQ').textContent = `${(w.a2b.backlog_bytes / 1000).toFixed(0)} kB · ${qms.toFixed(1)} ms`;
+      if (!$('#rtt').dataset.drag && (!lastWan || lastWan.settings.applied !== w.settings.applied)) syncControls(w.settings);
+      lastWan = w;
+    }
+  } catch (e) { /* lab down */ }
+  setTimeout(pollWan, 2000);
+}
+
+// ---- topology / hosts / tests / runs ---------------------------------------------------------------------------------
+function topo(ns) {
+  const st = Object.fromEntries((ns || []).map(n => [n.node, n.state])), down = n => st[n] !== 'running' ? ' down' : '';
+  const box = (n, x, y, w, h, cls, sub, fill) => `<rect class="box ${cls}${down(n)}" x="${x}" y="${y}" width="${w}" height="${h}" rx="6"/>` +
+    (fill ? `<rect x="${x}" y="${y}" width="5" height="${h}" rx="2" fill="${fill}"/>` : '') +
+    `<text x="${x + w / 2}" y="${y + (sub ? 16 : h / 2 + 4)}" text-anchor="middle" class="b">${n}</text>` + (sub ? `<text x="${x + w / 2}" y="${y + 30}" text-anchor="middle" class="sm">${sub}</text>` : '');
+  let s = '';
+  const hy = [20, 95, 170];
+  ALGOS.forEach((a, i) => { s += `<path class="wire" d="M78 ${hy[i] + 20} H95"/><path class="wire" d="M305 ${hy[i] + 20} H322"/>`; });
+  s += `<path class="wire" d="M95 40 V190 M305 40 V190 M95 115 H110 M150 115 H160 M240 115 H250 M290 115 H305"/>`;
+  ALGOS.forEach((a, i) => { s += box('a-' + a, 4, hy[i], 74, 40, '', LABEL[a], color(a)) + box('b-' + a, 322, hy[i], 74, 40, '', LABEL[a], color(a)); });
+  s += box('r1', 110, 95, 40, 40, '', '') + box('r2', 250, 95, 40, 40, '', '');
+  const w = lastWan && lastWan.settings;
+  s += box('wanem', 160, 88, 80, 54, 'wan', w ? `${w.rtt_ms} ms · ${w.rate_mbit}M` : 'netem + tbf');
+  s += `<text x="200" y="240" text-anchor="middle" class="sm">site A 192.168.141/24 · WAN 100.64.14.0/30 · site B 192.168.142/24</text>`;
+  $('#topo').innerHTML = s;
+}
+
+function hostsTable(ns) {
+  const by = Object.fromEntries((ns || []).map(n => [n.node, n]));
+  $('#hosts').innerHTML = `<tr><th>Node</th><th>Role</th><th>Data IP</th><th>CC</th><th>State</th></tr>` + (ns || []).map(n =>
+    `<tr><td class="mono">${n.cc ? `<span class="sw" style="background:${color(n.cc)}"></span>` : ''}${esc(n.node)}</td><td>${esc(n.role)}</td><td class="mono">${esc(n.data)}</td><td>${n.cc ? LABEL[n.cc] : '–'}</td>
+     <td><span class="pill ${n.state === 'running' ? 'ok' : 'bad'}">${esc(n.state)}</span></td></tr>`).join('');
+}
+
+function testsCard(t) {
+  if (!t) { $('#tests').innerHTML = '<span class="mute">No test run yet.</span>'; return; }
+  $('#tests').innerHTML = `<div><b class="${t.failed ? 'bad' : 'okc'}">${t.passed}/${t.total} passed</b> <span class="mute">${esc(t.when)}</span> · <a href="/report/report.html" target="_blank">report</a> · <a href="/report/log.html" target="_blank">log</a></div>` +
+    (t.suites ? `<table style="margin-top:6px">${t.suites.map(s => `<tr><td>${esc(s.name)}</td><td class="num ${s.failed ? 'bad' : 'okc'}">${s.passed}/${s.passed + s.failed}</td></tr>`).join('')}</table>` : '');
+}
+
+async function runsTable() {
+  const rs = await api('/api/runs').catch(() => []);
+  $('#runs').innerHTML = rs.slice(0, 8).map(r => `<tr><td><a href="#" data-id="${esc(r.id)}">${esc(r.mode)}</a></td><td><span class="st ${esc(r.status)}">${esc(r.status)}</span></td>
+    <td class="mute">${new Date(r.started * 1000).toLocaleString()}</td><td class="mute">${esc((r.steps[0] || {}).summary || '').slice(0, 60)}</td></tr>`).join('') || '<tr><td class="mute">none</td></tr>';
+  $('#runs').querySelectorAll('a').forEach(a => a.onclick = ev => { ev.preventDefault(); openRun(a.dataset.id); });
+}
+
+async function refresh() {
+  try {
+    STATE = await api('/api/state');
+    $('#upPill').textContent = STATE.all_up ? 'lab running' : STATE.up ? 'partly running' : 'lab off';
+    $('#upPill').className = 'pill ' + (STATE.all_up ? 'ok' : 'bad');
+    $('#busyPill').style.display = STATE.busy ? '' : 'none';
+    ['goBtn', 'verifyBtn', 'testBtn'].forEach(b => $('#' + b).disabled = !STATE.all_up);
+    topo(STATE.nodes); hostsTable(STATE.nodes); testsCard(STATE.tests);
+    if (!RUN && STATE.active) openRun(STATE.active);
+    else if (!RUN && !chartData) { const f = STATE.flows.compete || STATE.flows.solo; if (f) openRun(f.id); }
+    runsTable();
+  } catch (e) { $('#upPill').textContent = e.message; }
+}
+
+// ---- runs ------------------------------------------------------------------------------------------------------------
+function algosChosen() { return ALGOS.filter(a => $('#al_' + a).checked); }
+$('#algoPick').innerHTML = ALGOS.map(a => `<label><input type="checkbox" id="al_${a}" checked> <span class="sw" style="background:${color(a)}"></span>${LABEL[a]}</label>`).join(' ');
+document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => { MODE = b.dataset.m; document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('on', x === b));
+  $('#dur').value = MODE === 'compete' ? '30' : '20'; $('#stag').disabled = MODE === 'solo'; });
+$('#goBtn').onclick = () => startRun(MODE, {duration: +$('#dur').value, direction: $('#dir').value, algos: algosChosen(), stagger: MODE === 'compete' ? +$('#stag').value : 0});
+$('#verifyBtn').onclick = () => startRun('verify', {});
+$('#testBtn').onclick = () => startRun('test', {});
+
+async function startRun(mode, options) {
+  try { const r = await post('/api/runs', {mode, options}); openRun(r.id); }
+  catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+function openRun(id) { RUN = {id, log: []}; runSince = 0; pollRun(); }
+async function pollRun() {
+  if (!RUN) return;
+  const id = RUN.id, d = await api(`/api/runs/${id}?since=${runSince}`).catch(() => null);
+  if (!d || !RUN || RUN.id !== id) return;
+  RUN.log = [...RUN.log, ...d.log]; RUN.status = d.status; runSince = d.log_offset + d.log.length;
+  if (['compete', 'solo'].includes(d.mode)) {
+    const o = d.options || {};
+    const samples = [], marks = [];
+    for (const l of RUN.log) {
+      if (l.line.startsWith('SAMPLE ')) { try { samples.push(JSON.parse(l.line.slice(7))); } catch (e) {} }
+      else if (l.line.startsWith('MARK ')) { try { marks.push(JSON.parse(l.line.slice(5))); } catch (e) {} }
+    }
+    const n = (o.algos || ALGOS).length;
+    chartData = {samples, marks, algos: o.algos, direction: o.direction, rate0: d.result?.wan?.rate_mbit,
+      duration: d.mode === 'solo' ? (o.duration + 2) * n : o.duration + (o.stagger || 0) * (n - 1) + 2};
+    drawCharts();
+    $('#flowRes').innerHTML = d.result ? flowTable(d.result) : `<span class="mute small">${d.status === 'running' ? 'running — move the RTT slider to see each algorithm react' : esc(d.status)}</span>`;
+  }
+  const log = RUN.log.filter(l => !l.line.startsWith('SAMPLE ')).slice(-60).map(l => l.line).join('\n');
+  const steps = d.steps.map(s => `<li><span class="st ${s.status}">${s.status}</span> ${esc(s.title)}${s.summary ? ` — <span class="mute">${esc(s.summary)}</span>` : ''}</li>`).join('');
+  $('#run').innerHTML = `<div><b>${esc(d.mode)}</b> <span class="pill ${d.status === 'success' ? 'ok' : d.status === 'failed' ? 'bad' : 'accent'}">${esc(d.status)}</span> <span class="mute">${esc(d.id)}</span>${d.error ? ` <span class="bad">${esc(d.error)}</span>` : ''}</div>` +
+    `<ul class="steps">${steps}</ul><pre>${esc(log)}</pre>`;
+  if (['queued', 'running'].includes(d.status)) setTimeout(pollRun, 1000); else refresh();
+}
+
+async function init() {
+  $('#hubLink').href = `${location.protocol}//${location.hostname}:8088/`;
+  LAB = await api('/api/lab').catch(() => null);
+  if (LAB) { $('#ver').textContent = 'v' + LAB.version; $('#rtt').max = LAB.inventory.wan.rtt_max_ms; }
+  drawCharts(); await refresh(); pollWan(); setInterval(refresh, 10000);
+}
+init();
+</script>
+</body>
+</html>

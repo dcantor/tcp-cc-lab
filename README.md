@@ -1,0 +1,73 @@
+# tcp-cc-lab
+
+TCP congestion control across an emulated WAN: CUBIC, BBR and Reno side by side, with a slider for the round-trip time.
+
+```
+ a-cubic ┐                                                              ┌ b-cubic
+ a-bbr   ┼ LAN A ─ eth2 r1 eth1 ── eth1 wanem eth2 ── eth1 r2 eth2 ─ LAN B ┼ b-bbr
+ a-reno  ┘ 192.168.141/24        100.64.14.0/30 (bridged)      192.168.142/24 └ b-reno
+```
+
+| Node | What | OOB (tcpcc-oob 10.14.0.0/24) |
+|---|---|---|
+| r1, r2 | VyOS (overlays on `cat8000v-ipsec/images/vyos-base.qcow2`), static routes across the WAN | .11, .12 |
+| wanem | Alpine, Linux bridge + `tc`: netem delay RTT/2 (+ loss) → tbf bottleneck, both directions | .20 |
+| a-cubic / a-bbr / a-reno | Alpine hosts in site A, one algorithm each, iperf3 server | .31–.33 |
+| b-cubic / b-bbr / b-reno | the same in site B (each host's peer is the same algorithm on the other side) | .41–.43 |
+
+Libvirt/KVM (QEMU) like the other labs; ~3.8 GiB RAM. Domains `tcpcc-<node>`, consoles 127.0.0.1:5601–5609, MACs
+`52:54:00:ce:*`. Users: routers vyos / vyos, hosts and wanem lab / lab; your SSH key is installed on all of them.
+
+## Quick start
+
+```
+./lab.sh image       # once: images/tcpcc-alpine.qcow2 (~2 min)
+./lab.sh up          # first boot also pushes the routers' day-0 config over the console (~3 min)
+./lab.sh verify      # algorithms, WAN settings, routes, RTT between every A/B pair
+./lab.sh wan apply 100 100 0 1          # RTT 100 ms, 100 Mbit/s, 0 % loss, 1 x BDP buffer
+./lab.sh flows compete --duration 30    # all three at once through the bottleneck
+./lab.sh test        # Robot suites → results/latest
+```
+
+Portal: http://192.168.50.231:8112 (user unit `tcp-cc-lab-webapp`, Lab Hub sign-in). The RTT slider (0–300 ms,
+default 30) applies when released, with `tc qdisc change`, so a running flow keeps going and the chart marks the change.
+
+## The WAN emulator
+
+Defaults (lab.conf): RTT 30 ms, 100 Mbit/s, no loss, buffer 1 × BDP. The RTT is round trip: 15 ms is added each way.
+Per egress port of wanem's bridge:
+
+```
+root 1:  netem delay RTT/2, loss L% (random), limit = 2 × packets in flight on the delay line + 1000
+  └ 10:  tbf rate R, burst max(R/250 Hz, 2 MTU), limit = BUFFER × BDP bytes (min 20 packets)
+```
+
+Delay first, then the bottleneck: the queue a congestion control fills (and where it loses packets) is tbf's, and its size
+in bytes stays put when the delay moves. `wanem stats` gives both directions' counters as JSON (eth2 = towards r2 =
+site A → B). The VMs add about 0.9 ms of their own to the emulated RTT.
+
+## Monitoring and the Lab Hub
+
+- NMS: Prometheus job `tcp-cc-lab` scrapes the portal's `/metrics` (SD `http://10.0.0.1:8112/api/sd`, 15 s); alert group
+  `tcp-cc-lab` (wanem unreachable, host down, wrong algorithm, no fq / iperf3, failed tests); Grafana dashboard
+  **tcp-cc-lab: overview**. The config lives in `~/lab-portal/monitoring`.
+- Fast resume (`"fast_resume": true` in labs.json): the hub's shutdown saves each VM's memory (`virsh managedsave`, about
+  3.1 GB, 10 s); the next start resumes them and runs `lab.sh resumed`, which sets the clocks and verifies (35 s in all,
+  against several minutes cold). `lab.sh up` boots cold if a saved image will not restore; `rebuild` / `clean` discard it.
+
+## Things that are not obvious
+
+- **Bridges, not UDP tunnels.** The data links are isolated libvirt bridges. QEMU's UDP socket backend keeps the host's
+  default 208 KB receive buffer and silently drops bursts (found in homa-lab); a loss nobody sees would skew exactly the
+  thing this lab measures.
+- **Offloads off on wanem** (GRO, LRO = virtio guest TSO, TSO, GSO): otherwise netem and tbf see 64 KB super-packets and
+  the queue limit in packets means nothing. Bytes/packets through tbf ≈ 1512 confirms it.
+- **netem's default limit (1000 packets) is too small** for a long fat pipe: it would drop like a random-loss link.
+  wanem sizes it from the RTT and rate on every change.
+- **Hosts:** `tcp_no_metrics_save=1` (a cached ssthresh from the previous run would start the next one), 32 MB buffers (a
+  window cap would otherwise limit throughput at 300 ms, not the algorithm), fq on eth1 (BBR's pacing).
+- **Alpine has doas, not sudo:** the seeds add `permit nopass lab`.
+- **Measured at 0.1.0:** 1 × BDP at 30 ms: BBR ~80, CUBIC ~8, Reno ~6 Mbit/s when competing. ¼ BDP at 100 ms: BBR 84
+  of 92. 4 × BDP at 30 ms, alone: CUBIC mean RTT 128 ms (fills the buffer), BBR 64 ms, Reno 84 ms.
+- **Headless Chrome on this host** (156, updated 2026-10-19) hangs loading any http:// page, so the portal's look was
+  checked from a file:// copy fed with recorded API answers.

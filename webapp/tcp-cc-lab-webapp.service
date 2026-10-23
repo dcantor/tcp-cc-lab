@@ -1,0 +1,12 @@
+[Unit]
+Description=tcp-cc-lab - TCP congestion control lab portal (http://0.0.0.0:8112)
+After=network-online.target libvirtd.service
+
+[Service]
+WorkingDirectory=/home/dcantor/tcp-cc-lab
+ExecStart=/home/dcantor/tcp-cc-lab/lab.sh webapp
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

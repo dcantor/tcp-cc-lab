@@ -1,0 +1,4 @@
+<network>
+  <name>tcpcc-wan-a</name>
+  <bridge name='virbr-tccwana' stp='off' delay='0'/>
+</network>

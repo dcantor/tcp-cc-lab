@@ -1,0 +1,5 @@
+# the versions the sibling portals run on this host's Python 3.14
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+pydantic==2.13.5
+labportal @ git+https://github.com/dcantor/lab-portal
