@@ -2,6 +2,12 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.2.1] - 2026-10-22
+
+### Added
+- Portal: a dark / light toggle in the header ("☾ dark" / "☀ light"), like the other lab portals: it follows the OS
+  setting until chosen, and the choice is kept in the browser (`portal-theme`).
+
 ## [0.2.0] - 2026-10-22
 
 ### Added

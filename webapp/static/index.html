@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>try { const t = localStorage.getItem('portal-theme'); document.documentElement.dataset.theme = t ? t : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch (e) { }</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>tcp-cc-lab portal</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M3 24 C10 24 10 8 16 8 S22 20 29 14' stroke='%232a78d6' stroke-width='3' fill='none'/%3E%3Cpath d='M3 26 H29' stroke='%23eb6834' stroke-width='3'/%3E%3C/svg%3E">
@@ -74,7 +75,7 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
   <span class="pill" id="ver"></span>
   <div class="right">
     <span id="upPill" class="pill">…</span><span id="busyPill" class="pill accent" style="display:none">run going</span>
-    <a href="/docs">API</a><a id="hubLink">Lab Hub</a>
+    <a href="#" id="theme-toggle" title="dark / light (follows the OS setting until chosen)">☾ dark</a><a href="/docs">API</a><a id="hubLink">Lab Hub</a>
   </div>
 </header>
 <main>
@@ -376,6 +377,13 @@ async function pollRun() {
     `<ul class="steps">${steps}</ul><pre>${esc(log)}</pre>`;
   if (['queued', 'running'].includes(d.status)) setTimeout(pollRun, 1000); else refresh();
 }
+
+function applyTheme() { let t = null; try { t = localStorage.getItem('portal-theme'); } catch (e) { }
+  const dark = t ? t === 'dark' : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light'; $('#theme-toggle').textContent = dark ? '☀ light' : '☾ dark'; }
+applyTheme();
+$('#theme-toggle').onclick = e => { e.preventDefault(); try { localStorage.setItem('portal-theme', document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); } catch (x) { } applyTheme(); };
+if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
 async function init() {
   $('#hubLink').href = `${location.protocol}//${location.hostname}:8088/`;
