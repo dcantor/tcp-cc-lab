@@ -6,6 +6,9 @@ Runs go through the shared run engine (labportal): one at a time, streamed, kept
 
     compete    all three algorithms at once through the shared bottleneck (tools/cclab.py compete)
     solo       each algorithm alone, one after the other (tools/cclab.py solo)
+    live       the chosen algorithms at once, until stopped (or max_s): the sender bit rate (iperf3 -b) can be changed while it
+               goes (POST /api/live/bitrate: the flows are stopped and new ones started with the new -b) as can the WAN;
+               the bottleneck queue is sampled every second (WAN lines)
     verify     ./lab.sh verify: algorithms, WAN settings, routes, RTT across the WAN
     test       the Robot suites (all, or one), results in tests/results_<date>_<time>/ (results/latest links the newest)
 
@@ -36,6 +39,8 @@ STATIC = Path(__file__).resolve().parent / "static"
 VERSION = (LAB / "VERSION").read_text().strip()
 SUITES = sorted(p.stem for p in (LAB / "tests" / "suites").glob("*.robot"))
 FLOW_MODES = ("compete", "solo")
+LIVE_MODES = (*FLOW_MODES, "live")   # runs that draw per-second samples
+BITRATE_MAX = 1000   # Mbit/s; 0 = iperf3 without -b
 
 app = FastAPI(title="tcp-cc-lab portal API", version="1.0", docs_url="/docs",
               description="TCP congestion control (CUBIC / BBR / Reno) over an emulated WAN: the emulator, flows, tests. UI: [/](/)")
@@ -107,7 +112,7 @@ def mtu(fresh=False):
 def live_flows():
     """While a compete / solo run goes: each algorithm's last per-second sample (from the run's SAMPLE lines, at most 5 s old)."""
     a = active_run()
-    if not a or a.mode not in FLOW_MODES: return []
+    if not a or a.mode not in LIVE_MODES: return []
     last = {}
     for l in a.log[-200:]:
         if l["line"].startswith("SAMPLE "):
@@ -131,7 +136,7 @@ def tests_summary():
 def latest_flows():
     out = {}
     for r in registry.list(limit=200):
-        if r["mode"] in FLOW_MODES and r["mode"] not in out and r["status"] == "success" and r.get("result"): out[r["mode"]] = {"id": r["id"], "finished": r["finished"], "result": r["result"]}
+        if r["mode"] in LIVE_MODES and r["mode"] not in out and r["status"] == "success" and r.get("result"): out[r["mode"]] = {"id": r["id"], "finished": r["finished"], "result": r["result"]}
     return out
 
 
@@ -177,7 +182,7 @@ def set_wan(w: Wan):
     except ValueError as e: raise HTTPException(422, str(e))
     except Exception as e: raise HTTPException(502, str(e)[:300])   # noqa: BLE001
     _wan["t"] = 0
-    if a and a.mode in FLOW_MODES: a.say("MARK " + json.dumps({"ts": round(time.time(), 2), **{k: v["settings"][k] for k in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}}))
+    if a and a.mode in LIVE_MODES: a.say("MARK " + json.dumps({"ts": round(time.time(), 2), **{k: v["settings"][k] for k in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}}))
     return v
 
 
@@ -216,22 +221,26 @@ def report(name: str):
 # ---- runs ------------------------------------------------------------------------------------------------------------
 class RunRequest(BaseModel):
     mode: str = Field(..., description="compete | solo | verify | test")
-    options: dict = Field(default_factory=dict, description="compete/solo: {duration: s, direction: a2b|b2a, algos: [cubic, bbr, reno], stagger: s}; test: {suite}")
+    options: dict = Field(default_factory=dict, description="compete/solo: {duration: s, direction: a2b|b2a, algos: [cubic, bbr, reno], stagger: s, bitrate_mbit}; "
+                          "live: {max_s, direction, algos, bitrate_mbit}; test: {suite}. bitrate_mbit: iperf3 -b per flow, 0 or missing = unlimited")
 
 
 class Run(RunBase):
     LAB = NAME
     EXTRA = {"result": "result"}
     STEP_TITLES = {"compete": "All algorithms at once through the bottleneck", "solo": "Each algorithm alone",
-                   "verify": "Verify: algorithms, WAN settings, routes, RTT across the WAN", "test": "Robot Framework suites"}
+                   "verify": "Verify: algorithms, WAN settings, routes, RTT across the WAN", "test": "Robot Framework suites",
+                   "live": "Live test"}
 
     def __init__(self, mode, options=None, resume_of=None):
-        self.result = None
+        self.result = None; self.ctl = {"stop": False, "bitrate": None}
         super().__init__(mode, options, resume_of, runs_dir=RUNS_DIR, cwd=LAB)
         o = self.options
         if mode in FLOW_MODES:
             self.steps[0]["title"] = (f"{self.STEP_TITLES[mode]}: {', '.join(o['algos'])}, {o['duration']} s, "
                                       f"site {'A → B' if o['direction'] == 'a2b' else 'B → A'}" + (f", {o['stagger']} s apart" if o.get("stagger") else ""))
+        if mode == "live":
+            self.steps[0]["title"] = f"Live test: {', '.join(o['algos'])} at once, site {'A → B' if o['direction'] == 'a2b' else 'B → A'}, until stopped (at most {o['max_s']} s)"
         if mode == "test" and o.get("suite"): self.steps[0]["title"] = f"Robot suite {o['suite']}"
 
     def plan(self): return [self.mode]
@@ -239,6 +248,7 @@ class Run(RunBase):
     def _flows(self, s):
         o = self.options; out = RUNS_DIR / f"{self.id}.flows.json"
         args = f"{self.mode} --duration {int(o['duration'])} --direction {o['direction']} --algos {','.join(o['algos'])} --stagger {float(o.get('stagger') or 0)}"
+        if o.get("bitrate_mbit"): args += f" --bitrate {o['bitrate_mbit']:g}M"
         rc = self.sh(["bash", "-c", f'python3 "{LAB}/tools/cclab.py" {args} > "{out}"'], check=False)
         try: self.result = json.loads(out.read_text()); out.unlink()
         except Exception: self.result = None   # noqa: BLE001
@@ -249,6 +259,54 @@ class Run(RunBase):
 
     do_compete = _flows
     do_solo = _flows
+
+    def do_live(self, s):
+        """Flows run until stopped; a bit-rate change stops them (SIGINT: iperf3 ends its test cleanly) and starts new ones with the new -b."""
+        o = self.options; hs = C.senders(o["direction"], o["algos"]); t0 = time.time(); end = t0 + o["max_s"]
+        self.ctl["bitrate"] = o.get("bitrate_mbit") or 0; segs, sent, last_w = [], {}, None
+        def flow(h, br, tries=0):
+            f = C.Flow(h, max(5, int(end - time.time()) + 2), t0, bitrate=f"{br:g}M" if br else None)
+            f.started_at, f.br, f.tries = time.time(), br, tries; f.start(); return f
+        def start(br):
+            fs = [flow(h, br) for h in hs]
+            self.say(f"flows started: {', '.join(h['name'] + ' -> ' + h['peer'] for h in hs)}, iperf3 -b {f'{br:g}M' if br else 'unlimited'}"); return fs
+        def stop(fs):
+            C._parallel(lambda n: C.run(n, "pkill -INT -f '[i]perf3 -c'", timeout=10), [h["name"] for h in hs])
+            for f in fs: f.join(30)
+            for f in fs:   # a stopped iperf3 reports no receiver total: the segment's figures come from its per-second samples (sender side)
+                sm = f.samples; rt = [x["rtt_ms"] for x in sm if x["rtt_ms"]]
+                segs.append({**f.summary(), "bitrate_mbit": f.br, "from_s": round(f.started_at - t0, 1), "to_s": round(time.time() - t0, 1),
+                             "mbps": round(sum(x["mbps"] for x in sm) / len(sm), 2) if sm else 0, "retransmits": sum(x["retr"] for x in sm),
+                             "rtt_ms": {"min": min(rt, default=0), "mean": round(sum(rt) / len(rt), 2) if rt else 0, "max": max(rt, default=0)},
+                             "error": None if "interrupt" in (f.error or "") else f.error})
+        w0 = wan(fresh=True); self.say("START " + json.dumps({"ts": round(t0, 2), **{k: (w0.get("settings") or {}).get(k) for k in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}, "bitrate_mbit": self.ctl["bitrate"]}))
+        fs = start(self.ctl["bitrate"]); br = self.ctl["bitrate"]
+        def flush(fs):
+            for f in fs:
+                for smp in f.samples[sent.get(id(f), 0):]: self.say("SAMPLE " + json.dumps({**smp, "bitrate_mbit": f.br}))
+                sent[id(f)] = len(f.samples)
+        while True:
+            flush(fs)
+            for i, f in enumerate(fs):   # the peer's iperf3 server can still be closing the previous test: try again
+                if not f.is_alive() and "busy" in (f.error or "") and f.tries < 20: time.sleep(0.5); fs[i] = flow(f.h, f.br, f.tries + 1)
+            w = wan()
+            if "error" not in w and (not last_w or w["at"] > last_w["at"]):
+                d = w[o["direction"]]
+                if last_w:
+                    dt, p = w["at"] - last_w["at"], last_w[o["direction"]]
+                    self.say("WAN " + json.dumps({"ts": round(w["at"], 2), "mbps": round(max(0, d["bytes"] - p["bytes"]) * 8 / dt / 1e6, 1), "drops_s": round(max(0, d["drops"] - p["drops"]) / dt, 1),
+                                                  "q_ms": round(d["backlog_bytes"] * 8 / (w["settings"]["rate_mbit"] * 1000), 2), "q_kb": round(d["backlog_bytes"] / 1000, 1)}))
+                last_w = w
+            if self.ctl["stop"] or time.time() >= end or all(not f.is_alive() for f in fs): break
+            if self.ctl["bitrate"] != br:
+                br = self.ctl["bitrate"]; stop(fs); flush(fs)
+                self.say("MARK " + json.dumps({"ts": round(time.time(), 2), "bitrate_mbit": br})); fs = start(br)
+            time.sleep(0.25)
+        stop(fs); flush(fs)
+        self.result = {"mode": "live", "direction": o["direction"], "algos": o["algos"], "wan": w0.get("settings"), "seconds": round(time.time() - t0, 1), "segments": segs}
+        s["summary"] = f"{self.result['seconds']} s, {len(segs) // max(1, len(hs))} bit-rate segment(s)"
+        bad = [g for g in segs if g["error"]]
+        if bad: raise RuntimeError("; ".join(f"{g['cc']}: {g['error']}" for g in bad)[:300])
 
     def do_verify(self, s):
         rc = self.sh([LAB / "lab.sh", "verify"], check=False)
@@ -267,20 +325,47 @@ install_runs_api(app, registry, resume_factory=lambda d: Run(d["mode"], d.get("o
 
 @app.post("/api/runs", tags=["runs"], summary="Start a run: compete | solo (flows) | verify | test (all or one suite)")
 def start_run(req: RunRequest):
-    if req.mode not in (*FLOW_MODES, "verify", "test"): raise HTTPException(422, "mode: compete, solo, verify or test")
+    if req.mode not in (*LIVE_MODES, "verify", "test"): raise HTTPException(422, "mode: compete, solo, live, verify or test")
     o = dict(req.options)
-    if req.mode in FLOW_MODES:
-        o["duration"] = int(o.get("duration") or (30 if req.mode == "compete" else 20))
-        if not 5 <= o["duration"] <= 300: raise HTTPException(422, "options.duration: 5 .. 300 s")
+    if req.mode in LIVE_MODES:
+        o["bitrate_mbit"] = float(o.get("bitrate_mbit") or 0)
+        if not 0 <= o["bitrate_mbit"] <= BITRATE_MAX: raise HTTPException(422, f"options.bitrate_mbit: 0 (unlimited) .. {BITRATE_MAX}")
+    if req.mode == "live":
+        o["max_s"] = int(o.get("max_s") or 300); o["duration"] = o["max_s"]
+        if not 30 <= o["max_s"] <= 1800: raise HTTPException(422, "options.max_s: 30 .. 1800 s")
+    if req.mode in LIVE_MODES:
+        if req.mode != "live": o["duration"] = int(o.get("duration") or (30 if req.mode == "compete" else 20))
+        if req.mode != "live" and not 5 <= o["duration"] <= 300: raise HTTPException(422, "options.duration: 5 .. 300 s")
         o["direction"] = o.get("direction") or "a2b"
         if o["direction"] not in ("a2b", "b2a"): raise HTTPException(422, "options.direction: a2b or b2a")
         o["algos"] = [a for a in C.ALGOS if a in (o.get("algos") or C.ALGOS)]
         if not o["algos"]: raise HTTPException(422, "options.algos: some of cubic, bbr, reno")
-        o["stagger"] = float(o.get("stagger") or 0)
+        o["stagger"] = float(o.get("stagger") or 0) if req.mode != "live" else 0
         if not 0 <= o["stagger"] <= 60: raise HTTPException(422, "options.stagger: 0 .. 60 s")
     if req.mode == "test" and o.get("suite") not in (None, "", *SUITES): raise HTTPException(422, f"options.suite: one of {', '.join(SUITES)}")
     if not all_running(): raise HTTPException(409, "the lab is not (fully) running: power it on from the Lab Hub")
     return registry.start(Run(req.mode, o))
+
+
+def live_run():
+    a = active_run()
+    if not a or a.mode != "live": raise HTTPException(409, "no live test is going")
+    return a
+
+
+class Bitrate(BaseModel):
+    bitrate_mbit: float = Field(..., description=f"iperf3 -b per flow, Mbit/s; 0 = unlimited; 0..{BITRATE_MAX}")
+
+
+@app.post("/api/live/bitrate", tags=["runs"], summary="Change the live test's sender bit rate: its flows are stopped and new ones started with the new iperf3 -b")
+def live_bitrate(b: Bitrate):
+    if not 0 <= b.bitrate_mbit <= BITRATE_MAX: raise HTTPException(422, f"bitrate_mbit: 0 (unlimited) .. {BITRATE_MAX}")
+    a = live_run(); a.ctl["bitrate"] = b.bitrate_mbit; return {"id": a.id, "bitrate_mbit": b.bitrate_mbit}
+
+
+@app.post("/api/live/stop", tags=["runs"], summary="Stop the live test (its flows end cleanly and the run finishes)")
+def live_stop():
+    a = live_run(); a.ctl["stop"] = True; return {"id": a.id}
 
 
 # ---- monitoring ------------------------------------------------------------------------------------------------------

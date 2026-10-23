@@ -2,6 +2,24 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.5.0] - 2026-10-23
+
+### Added
+- Portal live test (mode `live`, now the default): CUBIC, BBR and Reno at once, until stopped. Four live charts with a
+  scrolling window: throughput, RTT, retransmits per second, and the bottleneck queue (wanem sampled every second).
+  There is also a readout of the latest second.
+- Sender bit-rate slider (`iperf3 -b` per flow, 1–1000 Mbit/s or unlimited). During a live test a change restarts the
+  flows with the new `-b`; the run retries when the peer's iperf3 server is still closing the previous test. Compete
+  and solo runs take `bitrate_mbit` too.
+- `POST /api/live/bitrate` and `POST /api/live/stop`. Each live run ends with a table of its flows, one row per bit
+  rate.
+
+### Changed
+- The loss slider has stops from 0.001 % to 10 % (it used to go 0–5 % in 0.1 % steps), so 0.01 % can be set. It also
+  shows "1 in N".
+- Each chart mark names only what changed (RTT, link rate, loss, buffer, `-b`). Its label is staggered and kept inside
+  the chart. MARK lines in the run log are shown in plain words.
+
 ## [0.4.0] - 2026-10-23
 
 ### Added

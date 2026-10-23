@@ -90,7 +90,7 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
         <div class="row"><select id="rate"><option>10</option><option>20</option><option>50</option><option selected>100</option><option>200</option><option>500</option><option>1000</option></select><span class="mute">Mbit/s</span></div>
         <div></div>
         <label for="loss">Random loss</label>
-        <input type="range" id="loss" min="0" max="5" step="0.1" value="0">
+        <input type="range" id="loss" min="0" max="14" step="1" value="0" aria-describedby="lossVal">
         <div class="big" id="lossVal">0 % <small>each way</small></div>
         <label>Bottleneck buffer</label>
         <div class="row"><span class="seg" id="bufSeg"><button data-b="0.25">¼ BDP</button><button data-b="1" class="on">1 BDP</button><button data-b="4">4 BDP</button><button data-b="16">16 BDP</button></span><span class="mute small" id="bufBytes"></span></div>
@@ -117,17 +117,27 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
     <section class="card">
       <h2>Flows <span class="mute small" id="flowsSub">— one TCP flow per algorithm, each site A host to its site B peer (iperf3)</span></h2>
       <div class="row">
-        <span class="seg" id="modeSeg"><button data-m="compete" class="on">Compete (all at once)</button><button data-m="solo">Solo (one at a time)</button></span>
-        <label class="mute small" for="dur">duration</label><select id="dur"><option value="20">20 s</option><option value="30" selected>30 s</option><option value="60">60 s</option><option value="120">120 s</option></select>
+        <span class="seg" id="modeSeg"><button data-m="live" class="on">Live (until stopped)</button><button data-m="compete">Compete (all at once)</button><button data-m="solo">Solo (one at a time)</button></span>
+        <label class="mute small" for="dur" id="durLbl">stop after</label><select id="dur"></select>
         <label class="mute small" for="dir">direction</label><select id="dir"><option value="a2b">site A → B</option><option value="b2a">site B → A</option></select>
         <label class="mute small" for="stag">start</label><select id="stag"><option value="0">together</option><option value="5">5 s apart</option><option value="10">10 s apart</option></select>
         <span class="row small" id="algoPick"></span>
         <button class="primary" id="goBtn">Start</button>
       </div>
+      <div class="ctl" style="margin-top:12px">
+        <label for="br">Sender bit rate <span class="small">(iperf3 -b, per flow)</span></label>
+        <input type="range" id="br" min="0" max="16" step="1" value="11" aria-describedby="brVal">
+        <div class="big" id="brVal">500 <small>Mbit/s</small></div>
+      </div>
+      <p class="mute small" id="liveHelp" style="margin:6px 0 0">Live: the flows run until you press Stop. Move the RTT, loss, rate or buffer controls above and the running flows see the change at once. iperf3 cannot change <code>-b</code> during a test, so moving the bit-rate slider ends the flows and starts new ones with the new <code>-b</code> (a new TCP connection, from slow start); the chart marks where.</p>
       <div class="legend" id="legend"></div>
+      <div class="row small" style="margin:2px 0 4px"><span class="mute">window</span><span class="seg" id="winSeg"><button data-w="60" class="on">last 60 s</button><button data-w="180">last 3 min</button><button data-w="0">whole run</button></span>
+        <span id="liveNow" class="mono" style="margin-left:auto"></span></div>
       <div class="charts">
-        <div><h3>Throughput <span>Mbit/s, per second</span></h3><div class="chart" id="cThr"></div></div>
+        <div><h3>Throughput <span>Mbit/s, per second (sender) · dashed: bottleneck rate</span></h3><div class="chart" id="cThr"></div></div>
         <div><h3>RTT the sender sees <span>ms (smoothed RTT, TCP_INFO)</span></h3><div class="chart" id="cRtt"></div></div>
+        <div><h3>Retransmits <span>segments per second</span></h3><div class="chart" id="cRetr"></div></div>
+        <div id="qWrap"><h3>Bottleneck queue <span>ms of queue at the tbf (live test)</span></h3><div class="chart" id="cQ"></div></div>
       </div>
       <div id="flowRes" style="margin-top:12px"></div>
     </section>
@@ -164,50 +174,59 @@ async function post(p, b) { const r = await fetch(p, {method: 'POST', headers: {
 const ALGOS = ['cubic', 'bbr', 'reno'];
 const LABEL = {cubic: 'CUBIC', bbr: 'BBR', reno: 'Reno'};
 const color = a => `var(--${a})`;
-let LAB = null, STATE = null, RUN = null, runSince = 0, MODE = 'compete', BUF = 1, lastWan = null, chartData = null;
+let LAB = null, STATE = null, RUN = null, runSince = 0, MODE = 'live', BUF = 1, lastWan = null, chartData = null;
 
 // ---- charts (one axis each, crosshair + tooltip) ---------------------------------------------------------------------
+const SER = {q: {label: 'Queue', color: 'var(--wan)'}};
+const colorOf = k => SER[k] ? SER[k].color : color(k), labelOf = k => SER[k] ? SER[k].label : LABEL[k];
 function lineChart(el, series, opt) {
-  // series: {algo: [[x, y], ...]}; opt: {unit, marks: [{x, label}], xmax}
+  // series: {key: [[x, y], ...]}; opt: {unit, marks: [{x, label}], xmin, xmax, hlines: [{y, label}], aria}
   const W = 520, H = 230, L = 40, R = 12, T = 12, B = 26;
-  const pts = Object.values(series).flat();
-  const xmax = Math.max(opt.xmax || 0, ...pts.map(p => p[0]), 10);
-  let ymax = Math.max(...pts.map(p => p[1]), opt.ymin || 1); ymax = niceMax(ymax);
-  const x = v => L + (v / xmax) * (W - L - R), y = v => T + (1 - v / ymax) * (H - T - B);
-  const yt = [0, .25, .5, .75, 1].map(f => f * ymax), xt = ticks(xmax);
+  const keys = [...ALGOS, ...Object.keys(series).filter(k => !ALGOS.includes(k))].filter(k => series[k] && series[k].length);
+  const xmin = opt.xmin || 0, xmax = Math.max(opt.xmax || 0, xmin + 10);
+  for (const k of keys) series[k] = series[k].filter(q => q[0] >= xmin - 1 && q[0] <= xmax);
+  const pts = keys.flatMap(k => series[k]), hl = opt.hlines || [];
+  let ymax = Math.max(...pts.map(p => p[1]), ...hl.map(h => h.y * 1.05), opt.ymin || 1); ymax = niceMax(ymax);
+  const x = v => L + (Math.max(xmin, v) - xmin) / (xmax - xmin) * (W - L - R), y = v => T + (1 - v / ymax) * (H - T - B);
+  const yt = [0, .25, .5, .75, 1].map(f => f * ymax), xt = ticks(xmin, xmax);
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opt.aria)}">`;
   s += yt.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`).join('');
   s += xt.map(v => `<text class="axis" x="${x(v)}" y="${H - 8}" text-anchor="middle">${v}s</text>`).join('');
-  for (const m of opt.marks || []) s += `<line class="mark" x1="${x(m.x)}" x2="${x(m.x)}" y1="${T}" y2="${H - B}"/><text class="marklbl" x="${x(m.x) + 4}" y="${T + 10}">${esc(m.label)}</text>`;
+  for (const h of hl) s += `<line class="mark" x1="${L}" x2="${W - R}" y1="${y(h.y)}" y2="${y(h.y)}"/><text class="marklbl" x="${L + 4}" y="${y(h.y) - 4}">${esc(h.label)}</text>`;
+  (opt.marks || []).filter(m => m.x >= xmin && m.x <= xmax).forEach((m, i) => {   // labels step down so neighbours don't collide; near the right edge they sit left of the line
+    const right = x(m.x) > W - R - 150;
+    s += `<line class="mark" x1="${x(m.x)}" x2="${x(m.x)}" y1="${T}" y2="${H - B}"/><text class="marklbl" x="${x(m.x) + (right ? -4 : 4)}" y="${T + 10 + (i % 3) * 12}" text-anchor="${right ? 'end' : 'start'}">${esc(m.label)}</text>`; });
   const lbl = [];
-  for (const a of ALGOS) {
-    const p = series[a]; if (!p || !p.length) continue;
-    s += `<path class="series" stroke="${color(a)}" d="${p.map((q, i) => (i ? 'L' : 'M') + x(q[0]).toFixed(1) + ' ' + y(q[1]).toFixed(1)).join('')}"/>`;
+  for (const a of keys) {
+    const p = series[a];
+    s += `<path class="series" stroke="${colorOf(a)}" d="${p.map((q, i) => (i ? 'L' : 'M') + x(q[0]).toFixed(1) + ' ' + y(q[1]).toFixed(1)).join('')}"/>`;
     const last = p[p.length - 1]; lbl.push({a, x: Math.min(x(last[0]) + 4, W - R - 34), y: y(last[1]) - 6});
   }
   lbl.sort((m, n) => m.y - n.y);   // direct labels at the lines' ends, pushed apart so they never overlap
   for (let i = 0; i < lbl.length; i++) lbl[i].y = Math.max(lbl[i].y, i ? lbl[i - 1].y + 12 : T + 10);
   for (let i = lbl.length - 1; i >= 0; i--) lbl[i].y = Math.min(lbl[i].y, i < lbl.length - 1 ? lbl[i + 1].y - 12 : H - B - 2);
-  s += lbl.map(l => `<text x="${l.x}" y="${l.y}" class="sm b">${LABEL[l.a]}</text>`).join('');
+  if (keys.length > 1) s += lbl.map(l => `<text x="${l.x}" y="${l.y}" class="sm b">${labelOf(l.a)}</text>`).join('');
+  if (!keys.length) s += `<text x="${(L + W - R) / 2}" y="${(T + H - B) / 2}" text-anchor="middle" class="sm">${esc(opt.empty || 'no data yet')}</text>`;
   s += `<line class="cross" id="${el.id}X" y1="${T}" y2="${H - B}" style="display:none"/>`;
-  s += ALGOS.map(a => `<circle class="dot" id="${el.id}D${a}" r="4.5" fill="${color(a)}" style="display:none"/>`).join('');
+  s += keys.map(a => `<circle class="dot" id="${el.id}D${a}" r="4.5" fill="${colorOf(a)}" style="display:none"/>`).join('');
   s += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" class="hit"/></svg>`;
   el.innerHTML = s;
   const svg = el.querySelector('svg'), hit = el.querySelector('.hit'), tip = $('#tip');
+  const hide = () => { tip.style.display = 'none'; el.querySelector(`#${el.id}X`).style.display = 'none'; keys.forEach(a => el.querySelector(`#${el.id}D${a}`).style.display = 'none'); };
   const move = ev => {
     const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width;
-    const xv = Math.max(0, Math.min(xmax, (px - L) / (W - L - R) * xmax));
+    const xv = xmin + Math.max(0, Math.min(1, (px - L) / (W - L - R))) * (xmax - xmin);
     const rows = [];
     let xs = null;
-    for (const a of ALGOS) {
-      const p = series[a], d = el.querySelector(`#${el.id}D${a}`); if (!p || !p.length) { d.style.display = 'none'; continue; }
+    for (const a of keys) {
+      const p = series[a], d = el.querySelector(`#${el.id}D${a}`);
       const q = p.reduce((b, c) => Math.abs(c[0] - xv) < Math.abs(b[0] - xv) ? c : b);
       if (Math.abs(q[0] - xv) > 2.5) { d.style.display = 'none'; continue; }
       xs = xs ?? q[0]; d.setAttribute('cx', x(q[0])); d.setAttribute('cy', y(q[1])); d.style.display = '';
-      rows.push(`<div><i style="background:${color(a)}"></i>${LABEL[a]} <b>${fmt(q[1])}</b> ${opt.unit}</div>`);
+      rows.push(`<div><i style="background:${colorOf(a)}"></i>${labelOf(a)} <b>${fmt(q[1])}</b> ${opt.unit}</div>`);
     }
     const cx = el.querySelector(`#${el.id}X`);
-    if (!rows.length) { tip.style.display = 'none'; cx.style.display = 'none'; return; }
+    if (!rows.length) { hide(); return; }
     cx.setAttribute('x1', x(xs)); cx.setAttribute('x2', x(xs)); cx.style.display = '';
     tip.innerHTML = `<div class="mute">t = ${xs} s</div>` + rows.join('');
     tip.style.display = 'block';
@@ -215,27 +234,54 @@ function lineChart(el, series, opt) {
     tip.style.left = left + 'px'; tip.style.top = (ev.pageY - 10) + 'px';
   };
   hit.addEventListener('pointermove', move);
-  hit.addEventListener('pointerleave', () => { tip.style.display = 'none'; el.querySelector(`#${el.id}X`).style.display = 'none'; ALGOS.forEach(a => el.querySelector(`#${el.id}D${a}`).style.display = 'none'); });
+  hit.addEventListener('pointerleave', hide);
 }
 const niceMax = v => { const e = Math.pow(10, Math.floor(Math.log10(v))); for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * e >= v) return m * e; return 10 * e; };
-const ticks = m => { const st = [5, 10, 15, 20, 30, 60].find(s => m / s <= 7) || 120; const out = []; for (let v = 0; v <= m; v += st) out.push(v); return out; };
+const ticks = (a, b) => { const st = [5, 10, 15, 20, 30, 60, 120, 300].find(s => (b - a) / s <= 7) || 600; const out = []; for (let v = Math.ceil(a / st) * st; v <= b; v += st) out.push(v); return out; };
 const fmt = v => v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(1).replace(/\.0$/, '') : (+v.toFixed(2)).toString();
 
-function drawCharts() {
-  const d = chartData || {samples: [], marks: []};
-  const t0 = d.samples.length ? Math.min(...d.samples.map(s => s.ts)) - 1 : 0;
-  const thr = {}, rtt = {};
-  for (const s of d.samples) { const t = Math.round((s.ts - t0) * 10) / 10; (thr[s.cc] ||= []).push([t, s.mbps]); if (s.rtt_ms) (rtt[s.cc] ||= []).push([t, s.rtt_ms]); }
-  const marks = (d.marks || []).filter(m => t0).map(m => ({x: Math.max(0, m.ts - t0), label: `RTT ${m.rtt_ms} ms` + (m.rate_mbit != lastRate(d, m) ? `, ${m.rate_mbit} Mbit/s` : '')}));
-  const xmax = d.duration || 30;
-  lineChart($('#cThr'), thr, {unit: 'Mbit/s', marks, xmax, aria: 'throughput per algorithm over time'});
-  lineChart($('#cRtt'), rtt, {unit: 'ms', marks, xmax, ymin: 10, aria: 'round-trip time per algorithm over time'});
-  $('#legend').innerHTML = (d.algos || ALGOS).map(a => `<span><i style="background:${color(a)}"></i>${LABEL[a]} <span class="mute">(${d.direction === 'b2a' ? 'b' : 'a'}-${a})</span></span>`).join('');
+let WIN = 60;
+const MARK_KEYS = [['rtt_ms', v => `RTT ${v} ms`], ['rate_mbit', v => `${v} Mbit/s link`], ['loss_pct', v => `loss ${v} %`], ['buffer_bdp', v => `buffer ${v} BDP`], ['bitrate_mbit', v => `-b ${brText(v)}`]];
+function markLabels(d) {
+  let prev = {...(d.wan0 || {}), bitrate_mbit: d.bitrate0};
+  return d.marks.map(m => { const ch = MARK_KEYS.filter(([k]) => k in m && m[k] !== prev[k]).map(([k, f]) => f(m[k])); prev = {...prev, ...m}; return ch.join(', ') || 'WAN set'; });
 }
-const lastRate = (d, m) => { const i = d.marks.indexOf(m); return i > 0 ? d.marks[i - 1].rate_mbit : d.rate0; };
-
+function drawCharts() {
+  const d = chartData || {samples: [], marks: [], wanS: []};
+  const all = [...d.samples.map(s => s.ts), ...(d.wanS || []).map(s => s.ts)];
+  const t0 = d.t0 || (all.length ? Math.min(...all) - 1 : 0), rt = ts => Math.round((ts - t0) * 10) / 10;
+  const thr = {}, rtt = {}, retr = {}, q = {};
+  for (const s of d.samples) { const t = rt(s.ts); (thr[s.cc] ||= []).push([t, s.mbps]); if (s.rtt_ms) (rtt[s.cc] ||= []).push([t, s.rtt_ms]); (retr[s.cc] ||= []).push([t, s.retr || 0]); }
+  for (const w of d.wanS || []) (q.q ||= []).push([rt(w.ts), w.q_ms]);
+  const labels = markLabels(d), marks = (d.marks || []).filter(() => t0).map((m, i) => ({x: Math.max(0, m.ts - t0), label: labels[i]}));
+  const now = all.length ? rt(Math.max(...all)) : 0, live = d.mode === 'live';
+  let xmin = 0, xmax = d.duration || 30;
+  if (live) { xmax = Math.max(now, 10); if (WIN) { xmin = Math.max(0, xmax - WIN); xmax = Math.max(xmax, WIN); } }
+  else if (WIN && now > WIN && d.running) { xmax = now; xmin = now - WIN; }
+  const rate = (d.wanNow || {}).rate_mbit, br = d.bitrateNow;
+  const hl = [...(rate ? [{y: rate, label: `bottleneck ${rate} Mbit/s`}] : [])];
+  lineChart($('#cThr'), thr, {unit: 'Mbit/s', marks, xmin, xmax, hlines: hl, aria: 'throughput per algorithm over time'});
+  lineChart($('#cRtt'), rtt, {unit: 'ms', marks, xmin, xmax, ymin: 10, aria: 'round-trip time per algorithm over time'});
+  lineChart($('#cRetr'), retr, {unit: 'retransmits/s', marks, xmin, xmax, ymin: 5, aria: 'retransmits per second per algorithm'});
+  $('#qWrap').style.display = live || q.q ? '' : 'none';
+  lineChart($('#cQ'), q, {unit: 'ms', marks, xmin, xmax, ymin: 1, empty: 'sampled during a live test', aria: 'bottleneck queue over time'});
+  $('#legend').innerHTML = (d.algos || ALGOS).map(a => `<span><i style="background:${color(a)}"></i>${LABEL[a]} <span class="mute">(${d.direction === 'b2a' ? 'b' : 'a'}-${a})</span></span>`).join('');
+  // the latest second, per algorithm
+  const last = {}; for (const s of d.samples) last[s.cc] = s;
+  const lw = (d.wanS || []).at(-1);
+  $('#liveNow').innerHTML = d.running ? Object.values(last).map(s => `<span style="margin-right:12px"><span class="sw" style="background:${color(s.cc)}"></span>${LABEL[s.cc]} <b>${fmt(s.mbps)}</b> Mbit/s · ${fmt(s.rtt_ms)} ms</span>`).join('') +
+    (lw ? `<span class="mute">queue ${fmt(lw.q_ms)} ms · drops ${fmt(lw.drops_s)}/s</span>` : '') + (live ? ` <span class="mute">· -b ${brText(br)}</span>` : '') : '';
+}
+function liveTable(r) {
+  const w = r.wan || {};
+  const rows = r.segments.map(g => `<tr><td><span class="sw" style="background:${color(g.cc)}"></span>${LABEL[g.cc]}${g.cc_reported && g.cc_reported !== g.cc ? ` <span class="bad">(kernel said ${esc(g.cc_reported)})</span>` : ''}</td>
+    <td class="num">${brText(g.bitrate_mbit)}</td><td class="num">${g.from_s} – ${g.to_s} s</td><td class="num">${g.mbps}</td><td class="num">${g.retransmits}</td><td class="num">${g.rtt_ms.min}</td><td class="num">${g.rtt_ms.mean}</td><td class="num">${g.rtt_ms.max}</td><td class="bad small">${esc(g.error || '')}</td></tr>`).join('');
+  return `<div class="small mute">Live test, ${r.seconds} s, site ${r.direction === 'a2b' ? 'A → B' : 'B → A'}; WAN at the start: RTT ${w.rtt_ms} ms, ${w.rate_mbit} Mbit/s, loss ${w.loss_pct} %, buffer ${w.buffer_bdp} × BDP. One row per flow: a new flow starts at each bit-rate change.</div>
+    <div class="scroll"><table><tr><th>Algorithm</th><th class="num">-b</th><th class="num">Time</th><th class="num">Mbit/s</th><th class="num">Retransmits</th><th class="num">RTT min</th><th class="num">mean</th><th class="num">max (ms)</th><th></th></tr>${rows}</table></div>`;
+}
 function flowTable(r) {
   if (!r) return '';
+  if (r.mode === 'live') return liveTable(r);
   const tot = r.flows.reduce((a, f) => a + f.mbps, 0) || 1;
   const rows = r.flows.map(f => `<tr><td><span class="sw" style="background:${color(f.cc)}"></span>${LABEL[f.cc]}${f.cc_reported && f.cc_reported !== f.cc ? ` <span class="bad">(kernel said ${esc(f.cc_reported)})</span>` : ''}</td><td class="mono">${esc(f.host)}</td>
     <td class="num">${f.mbps}</td><td class="num">${r.mode === 'compete' ? Math.round(100 * f.mbps / tot) + ' %' : '–'}</td><td class="num">${f.retransmits}</td>
@@ -248,10 +294,12 @@ function flowTable(r) {
 
 // ---- WAN controls --------------------------------------------------------------------------------------------------
 function showRtt(v) { $('#rttVal').innerHTML = `${v} ms <small>${+(v / 2).toFixed(1)} + ${+(v / 2).toFixed(1)}</small>`; }
-function showLoss(v) { $('#lossVal').innerHTML = `${(+v).toFixed(1).replace(/\.0$/, '')} % <small>each way</small>`; }
+const LOSS = [0, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 3, 5, 10];   // % — the slider's stops (fine where it matters)
+const nearest = (arr, v) => arr.reduce((b, c, i) => Math.abs(c - v) < Math.abs(arr[b] - v) ? i : b, 0);
+function showLoss(v) { $('#lossVal').innerHTML = `${+v} % <small>each way${v ? ` · 1 in ${Math.round(100 / v).toLocaleString()}` : ''}</small>`; }
 function syncControls(s) {
-  if (!s || document.activeElement === $('#rtt') && $('#rtt').dataset.drag) return;
-  $('#rtt').value = s.rtt_ms; showRtt(s.rtt_ms); $('#loss').value = s.loss_pct; showLoss(s.loss_pct);
+  if (!s || $('#rtt').dataset.drag || $('#loss').dataset.drag) return;
+  $('#rtt').value = s.rtt_ms; showRtt(s.rtt_ms); $('#loss').value = nearest(LOSS, s.loss_pct); showLoss(s.loss_pct);
   const r = String(s.rate_mbit); if (![...$('#rate').options].some(o => o.value === r)) $('#rate').add(new Option(r, r)); $('#rate').value = r;
   BUF = s.buffer_bdp; document.querySelectorAll('#bufSeg button').forEach(b => b.classList.toggle('on', +b.dataset.b === +BUF));
   $('#bufBytes').textContent = `= ${(s.queue_bytes / 1000).toFixed(0)} kB (${(s.queue_bytes * 8 / (s.rate_mbit * 1000)).toFixed(1)} ms at ${s.rate_mbit} Mbit/s)`;
@@ -263,8 +311,8 @@ async function applyWan(body) {
 }
 $('#rtt').addEventListener('input', e => { e.target.dataset.drag = 1; showRtt(e.target.value); });
 $('#rtt').addEventListener('change', e => { delete e.target.dataset.drag; applyWan({rtt_ms: +e.target.value}); });
-$('#loss').addEventListener('input', e => showLoss(e.target.value));
-$('#loss').addEventListener('change', e => applyWan({loss_pct: +e.target.value}));
+$('#loss').addEventListener('input', e => { e.target.dataset.drag = 1; showLoss(LOSS[+e.target.value]); });
+$('#loss').addEventListener('change', e => { delete e.target.dataset.drag; applyWan({loss_pct: LOSS[+e.target.value]}); });
 $('#rate').addEventListener('change', e => applyWan({rate_mbit: +e.target.value}));
 document.querySelectorAll('#bufSeg button').forEach(b => b.onclick = () => applyWan({buffer_bdp: +b.dataset.b}));
 $('#resetBtn').onclick = () => applyWan({reset: true});
@@ -296,7 +344,7 @@ async function pollWan() {
       }
       const qms = w.a2b.backlog_bytes * 8 / (w.settings.rate_mbit * 1000);
       $('#kQ').textContent = `${(w.a2b.backlog_bytes / 1000).toFixed(0)} kB · ${qms.toFixed(1)} ms`;
-      if (!$('#rtt').dataset.drag && (!lastWan || lastWan.settings.applied !== w.settings.applied)) syncControls(w.settings);
+      if ((!lastWan || lastWan.settings.applied !== w.settings.applied)) syncControls(w.settings);
       lastWan = w;
     }
   } catch (e) { /* lab down */ }
@@ -348,20 +396,45 @@ async function refresh() {
     $('#upPill').textContent = STATE.all_up ? 'lab running' : STATE.up ? 'partly running' : 'lab off';
     $('#upPill').className = 'pill ' + (STATE.all_up ? 'ok' : 'bad');
     $('#busyPill').style.display = STATE.busy ? '' : 'none';
-    ['goBtn', 'verifyBtn', 'testBtn'].forEach(b => $('#' + b).disabled = !STATE.all_up);
+    ['verifyBtn', 'testBtn'].forEach(b => $('#' + b).disabled = !STATE.all_up); goButton();
     topo(STATE.nodes); hostsTable(STATE.nodes); testsCard(STATE.tests); showMtu(STATE.mtu);
     if (!RUN && STATE.active) openRun(STATE.active);
-    else if (!RUN && !chartData) { const f = STATE.flows.compete || STATE.flows.solo; if (f) openRun(f.id); }
+    else if (!RUN && !chartData) { const f = STATE.flows.live || STATE.flows.compete || STATE.flows.solo; if (f) openRun(f.id); }
     runsTable();
   } catch (e) { $('#upPill').textContent = e.message; }
 }
 
 // ---- runs ------------------------------------------------------------------------------------------------------------
+const BR = [1, 2, 5, 10, 20, 50, 100, 150, 200, 300, 400, 500, 600, 700, 800, 1000, 0];   // Mbit/s; 0 = no -b
+const brText = v => v ? `${v}M` : 'unlimited';
+function showBr(v) { $('#brVal').innerHTML = v ? `${v} <small>Mbit/s</small>` : 'unlimited <small>no -b</small>'; }
+const liveGoing = () => RUN && RUN.mode === 'live' && ['queued', 'running'].includes(RUN.status);
+$('#br').addEventListener('input', e => { e.target.dataset.drag = 1; showBr(BR[+e.target.value]); });
+$('#br').addEventListener('change', async e => {
+  delete e.target.dataset.drag; const v = BR[+e.target.value]; if (!liveGoing()) return;
+  try { await post('/api/live/bitrate', {bitrate_mbit: v}); $('#wanMsg').innerHTML = `<span class="okc">-b ${brText(v)}: new flows starting</span>`; }
+  catch (x) { $('#wanMsg').innerHTML = `<span class="bad">${esc(x.message)}</span>`; }
+});
+const DUR = {live: [[120, '2 min'], [300, '5 min'], [600, '10 min'], [900, '15 min'], [1800, '30 min']], compete: [[20, '20 s'], [30, '30 s'], [60, '60 s'], [120, '120 s']], solo: [[20, '20 s'], [30, '30 s'], [60, '60 s'], [120, '120 s']]};
+function setMode(m) {
+  MODE = m; document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('on', x.dataset.m === m));
+  $('#dur').innerHTML = DUR[m].map(([v, t]) => `<option value="${v}">${t}</option>`).join(''); $('#dur').value = m === 'live' ? 600 : m === 'compete' ? 30 : 20;
+  $('#durLbl').textContent = m === 'live' ? 'stop after' : 'duration'; $('#stag').disabled = m !== 'compete'; $('#liveHelp').style.display = m === 'live' ? '' : 'none';
+}
+function goButton() {
+  const g = liveGoing(); $('#goBtn').textContent = g ? 'Stop' : 'Start'; $('#goBtn').classList.toggle('primary', !g);
+  $('#goBtn').disabled = !g && !(STATE && STATE.all_up);
+}
 function algosChosen() { return ALGOS.filter(a => $('#al_' + a).checked); }
 $('#algoPick').innerHTML = ALGOS.map(a => `<label><input type="checkbox" id="al_${a}" checked> <span class="sw" style="background:${color(a)}"></span>${LABEL[a]}</label>`).join(' ');
-document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => { MODE = b.dataset.m; document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('on', x === b));
-  $('#dur').value = MODE === 'compete' ? '30' : '20'; $('#stag').disabled = MODE === 'solo'; });
-$('#goBtn').onclick = () => startRun(MODE, {duration: +$('#dur').value, direction: $('#dir').value, algos: algosChosen(), stagger: MODE === 'compete' ? +$('#stag').value : 0});
+document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+document.querySelectorAll('#winSeg button').forEach(b => b.onclick = () => { WIN = +b.dataset.w; document.querySelectorAll('#winSeg button').forEach(x => x.classList.toggle('on', x === b)); drawCharts(); });
+setMode('live'); showBr(BR[+$('#br').value]);
+$('#goBtn').onclick = async () => {
+  if (liveGoing()) { try { await post('/api/live/stop', {}); $('#goBtn').disabled = true; $('#goBtn').textContent = 'stopping…'; } catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } return; }
+  const br = BR[+$('#br').value], o = {direction: $('#dir').value, algos: algosChosen(), bitrate_mbit: br};
+  startRun(MODE, MODE === 'live' ? {...o, max_s: +$('#dur').value} : {...o, duration: +$('#dur').value, stagger: MODE === 'compete' ? +$('#stag').value : 0});
+};
 $('#verifyBtn').onclick = () => startRun('verify', {});
 $('#testBtn').onclick = () => startRun('test', {});
 
@@ -370,29 +443,31 @@ async function startRun(mode, options) {
   catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
 }
 function openRun(id) { RUN = {id, log: []}; runSince = 0; pollRun(); }
+const parseLines = (log, tag) => log.filter(l => l.line.startsWith(tag + ' ')).map(l => { try { return JSON.parse(l.line.slice(tag.length + 1)); } catch (e) { return null; } }).filter(Boolean);
 async function pollRun() {
   if (!RUN) return;
   const id = RUN.id, d = await api(`/api/runs/${id}?since=${runSince}`).catch(() => null);
   if (!d || !RUN || RUN.id !== id) return;
-  RUN.log = [...RUN.log, ...d.log]; RUN.status = d.status; runSince = d.log_offset + d.log.length;
-  if (['compete', 'solo'].includes(d.mode)) {
-    const o = d.options || {};
-    const samples = [], marks = [];
-    for (const l of RUN.log) {
-      if (l.line.startsWith('SAMPLE ')) { try { samples.push(JSON.parse(l.line.slice(7))); } catch (e) {} }
-      else if (l.line.startsWith('MARK ')) { try { marks.push(JSON.parse(l.line.slice(5))); } catch (e) {} }
-    }
-    const n = (o.algos || ALGOS).length;
-    chartData = {samples, marks, algos: o.algos, direction: o.direction, rate0: d.result?.wan?.rate_mbit,
-      duration: d.mode === 'solo' ? (o.duration + 2) * n : o.duration + (o.stagger || 0) * (n - 1) + 2};
+  RUN.log = [...RUN.log, ...d.log]; RUN.status = d.status; RUN.mode = d.mode; runSince = d.log_offset + d.log.length;
+  if (['compete', 'solo', 'live'].includes(d.mode)) {
+    const o = d.options || {}, n = (o.algos || ALGOS).length, marks = parseLines(RUN.log, 'MARK');
+    const running = ['queued', 'running'].includes(d.status), w = lastWan && lastWan.settings;
+    let brNow = o.bitrate_mbit || 0; for (const m of marks) if ('bitrate_mbit' in m) brNow = m.bitrate_mbit;
+    const start = parseLines(RUN.log, 'START')[0];
+    chartData = {mode: d.mode, running, samples: parseLines(RUN.log, 'SAMPLE'), wanS: parseLines(RUN.log, 'WAN'), marks, algos: o.algos, direction: o.direction,
+      t0: d.mode === 'live' ? d.steps[0].started : null, wan0: start || d.result?.wan, bitrate0: o.bitrate_mbit || 0, bitrateNow: brNow,
+      wanNow: running ? w : d.result?.wan, duration: d.mode === 'solo' ? (o.duration + 2) * n : o.duration + (o.stagger || 0) * (n - 1) + 2};
+    if (running && d.mode === 'live' && !$('#br').dataset.drag) { $('#br').value = nearest(BR, brNow); showBr(brNow); }
     drawCharts();
-    $('#flowRes').innerHTML = d.result ? flowTable(d.result) : `<span class="mute small">${d.status === 'running' ? 'running — move the RTT slider to see each algorithm react' : esc(d.status)}</span>`;
+    $('#flowRes').innerHTML = d.result ? flowTable(d.result) : `<span class="mute small">${running ? (d.mode === 'live' ? 'live — move the sliders and watch each algorithm react; Stop ends it' : 'running — move the RTT slider to see each algorithm react') : esc(d.status)}</span>`;
   }
-  const log = RUN.log.filter(l => !l.line.startsWith('SAMPLE ')).slice(-60).map(l => l.line).join('\n');
+  goButton();
+  const lbl = chartData && chartData.marks ? markLabels(chartData) : []; let mi = 0;
+  const log = RUN.log.filter(l => !/^(SAMPLE|WAN|START) /.test(l.line)).map(l => l.line.startsWith('MARK ') ? `changed: ${lbl[mi++] || l.line.slice(5)}` : l.line).slice(-60).join('\n');
   const steps = d.steps.map(s => `<li><span class="st ${s.status}">${s.status}</span> ${esc(s.title)}${s.summary ? ` — <span class="mute">${esc(s.summary)}</span>` : ''}</li>`).join('');
   $('#run').innerHTML = `<div><b>${esc(d.mode)}</b> <span class="pill ${d.status === 'success' ? 'ok' : d.status === 'failed' ? 'bad' : 'accent'}">${esc(d.status)}</span> <span class="mute">${esc(d.id)}</span>${d.error ? ` <span class="bad">${esc(d.error)}</span>` : ''}</div>` +
     `<ul class="steps">${steps}</ul><pre>${esc(log)}</pre>`;
-  if (['queued', 'running'].includes(d.status)) setTimeout(pollRun, 1000); else refresh();
+  if (['queued', 'running'].includes(d.status)) setTimeout(pollRun, d.mode === 'live' ? 500 : 1000); else refresh();
 }
 
 function applyTheme() { let t = null; try { t = localStorage.getItem('portal-theme'); } catch (e) { }

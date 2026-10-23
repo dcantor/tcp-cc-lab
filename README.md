@@ -34,6 +34,19 @@ python3 tools/bbr_experiment.py --trials 1 --duration 30 --bitrate 500M   # the 
 Portal: http://192.168.50.231:8112 (user unit `tcp-cc-lab-webapp`, Lab Hub sign-in). The RTT slider (0–300 ms,
 default 30) applies when released, with `tc qdisc change`, so a running flow keeps going and the chart marks the change.
 
+**Live test** (the portal's default flow mode): the chosen algorithms run at once until you press Stop (at most 2–30
+min). Four charts update every second over a scrolling window (last 60 s, last 3 min or the whole run): throughput,
+the sender's smoothed RTT, retransmits per second, and the bottleneck queue at wanem. While it runs you can move:
+- the WAN controls (RTT, rate, loss, buffer): applied in place, the flows keep going;
+- the loss slider: stops from 0.001 % to 10 %, fine at the low end;
+- the **sender bit rate** slider (`iperf3 -b` per flow, 1 Mbit/s to 1000 Mbit/s or unlimited). iperf3 can't change
+  `-b` during a test, so the portal ends the flows (SIGINT, so iperf3 finishes cleanly) and starts new ones. Each one
+  is a new TCP connection that starts in slow start.
+
+Each change is marked on the charts. When the test ends, a table shows one row per flow and bit rate. API:
+`POST /api/runs {"mode": "live", "options": {"algos", "bitrate_mbit", "max_s"}}`, then `POST /api/live/bitrate` and
+`POST /api/live/stop`. Compete and solo runs also take `bitrate_mbit`.
+
 ## MTU
 
 r1, r2 and wanem's data links are jumbo (9000), always, as are the four libvirt bridges under them. The hosts' eth1 is
