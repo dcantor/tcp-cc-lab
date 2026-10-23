@@ -583,6 +583,27 @@ def chart_k(cond):
     return "".join(s)
 
 
+def k_runs_html():
+    """Every run of the experiment, second by second: one chart per profile (RTT x path), the three algorithms on it."""
+    d, cells = k_analysis(); des = d["design"]; out = []
+    for rtt in des["rtts"]:
+        cs = [c for c in cells if c["rtt"] == rtt]
+        if not cs: continue
+        out.append(f"<h3 class='page'>Every run at RTT {rtt} ms</h3>" if rtt != des["rtts"][0] else f"<h3 class='page'>Every run, second by second</h3><p>Each chart is one profile: the three algorithms' runs (one TCP flow each, iperf3 -t {des['duration_s']} -b {E(des.get('iperf_bitrate') or 'unlimited')}, run one after the other) drawn on the same time axis, per-second throughput as iperf3 reported it. The dotted line is the 500 Mbit/s bottleneck; per-second values can exceed it slightly because iperf3 counts what the sender wrote in each interval. The scale is the same on every chart.</p><p class='small'>" + " ".join(f"<span class='sw' style='background:{COL[c]}'></span>{NAME[c]} &nbsp;" for c in ("cubic", "bbr", "reno")) + "</p><h3>RTT {rtt} ms</h3>")
+        out.append("<div class='two'>")
+        for c in cs:
+            runs = {r["cc"]: r for r in c["cell"]["runs"]}
+            series = [(cc, NAME[cc], [(i + 1, v) for i, v in enumerate(runs[cc]["per_second"])]) for cc in ("cubic", "bbr", "reno") if cc in runs]
+            avg = " · ".join(f"{NAME[cc]} {runs[cc]['mbps']:.0f}" for cc in ("cubic", "bbr", "reno") if cc in runs)
+            title = f"{k_cond_label(c['cond'])}, RTT {rtt} ms"
+            out.append(f"<div class='fig'><div class='t'>{E(title)}</div>"
+                       + svg_lines(series, "Mbit/s", xlabel="seconds", ymax=600, h=220, w=420, legend=False, hline=(500, "500 Mbit/s"))
+                       + f"<div class='cap'>30 s average, Mbit/s: {avg}. Retransmits: "
+                       + " · ".join(f"{NAME[cc]} {runs[cc]['retransmits']:,}" for cc in ("cubic", "bbr", "reno") if cc in runs) + "</div></div>")
+        out.append("</div>")
+    return "".join(out)
+
+
 def k_legend():
     return ("<p class='small'>" + " ".join(f"<span class='sw' style='background:{COL[c]}'></span>{NAME[c]} &nbsp;" for c in ("cubic", "bbr", "reno"))
             + " Goodput of each run, Mbit/s; the axis runs to the 500 Mbit/s bottleneck.</p>")
@@ -885,6 +906,7 @@ def build():
         km = k_meta()
         s = re.sub(r"\{\{kmeta:(\w+)\}\}", lambda m: (f"{km[m.group(1)]:.1f}" if isinstance(km[m.group(1)], float) else str(km[m.group(1)])), s)
         s = s.replace("{{k_legend}}", k_legend())
+        s = s.replace("{{k_runs}}", k_runs_html())
         _, kc = k_analysis(); c10 = next(c for c in kc if c["cond"] == "clean" and c["rtt"] == 10)
         s = s.replace("{{k_retr_clean10}}", f"{c10['retr']['bbr']['mean']:,.0f}").replace("{{k_retr_clean10_cubic}}", f"{c10['retr']['cubic']['mean']:,.0f}")
         s = re.sub(r"\{\{k:([\w@.]+)\}\}", lambda m: k_val(m.group(1)), s)
