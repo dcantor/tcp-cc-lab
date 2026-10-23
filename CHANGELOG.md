@@ -11,7 +11,13 @@ All notable changes to this lab are documented here ([Keep a Changelog](https://
 - Robot suite `05_rtt_series`: one test per algorithm (CUBIC, BBR, Reno) over that series, 15 s per point; >= 80 % of
   the rate up to 60 ms, >= 40 % at 100 and 150 ms, the reported algorithm and the RTT floor checked at every point.
 - Walkthrough J (section 16) in the PDF: the 500 Mbit/s series from a live run (throughput by RTT, the 150 ms ramp,
-  queueing delay added, per-point table); `build_walkthrough.py --sweep500` re-measures just that series. Findings 9-10.
+  queueing delay added, per-point table), run twice: hosts at MTU 1500 and at 9000, compared side by side.
+  `build_walkthrough.py --sweep500` re-measures both series and the tcp_mem check. Findings 9-12.
+- The hosts' TCP settings in the walkthrough: an annotated table of the settings that shape a bulk flow (read live from
+  all six hosts, lab-set vs kernel default), the cloud-init files that set them, and Appendix D with every
+  `net.ipv4.tcp_*` / `net.core` buffer value and eth1's fq qdisc.
+- A tcp_mem check: the hosts' 217 MB of RAM sizes `tcp_mem` at 13.2 MB pressure / 19.8 MB high; one CUBIC flow at
+  500 Mbit/s x 150 ms put its sender into memory pressure 95 times in 20 s (documented, not changed).
 
 ### Changed
 - The walkthrough's cover is a white-paper title page (author, date, abstract).

@@ -4,7 +4,7 @@
     build_walkthrough.py --refresh     collect everything from the running lab into docs/data/ and docs/img/ (~12 min:
                                        show commands, the experiments, a portal run and its screenshots), then build
     build_walkthrough.py               build from docs/data/ as collected last time
-    build_walkthrough.py --sweep500    re-run only walkthrough J (the 500 Mbit/s RTT series, ~8 min), then build
+    build_walkthrough.py --sweep500    re-run only walkthrough J (the 500 Mbit/s RTT series at MTU 1500 and 9000, ~16 min), then build
     build_walkthrough.py --html-only   stop after docs/walkthrough.html
 
 Placeholders in the source: {{text:NAME}} (docs/data/NAME.txt, preformatted), {{val:NAME.path}} (a value from
@@ -202,7 +202,9 @@ def collect():
     put("ping_df_1500", C.run("a-cubic", f"ping -c 2 -M do -s 1600 {C.node('b-cubic')['ip']} 2>&1; true")[1].strip())
     put("solo_1500", solo(C, duration=15))
     C.wan_reset()
+    collect_host_tcp(C)
     collect_sweep500(C)
+    collect_tcp_mem_check(C)
     # the portal: metrics, SD, a run with RTT changes, screenshots
     ck = portal_cookie()
     put("metrics", "\n".join(l for l in portal("/metrics", cookie=ck, raw=True).splitlines()
@@ -213,12 +215,58 @@ def collect():
     shoot()
 
 
-def collect_sweep500(C=None):
-    """J: each algorithm alone at RTT 0, 10, 30, 60, 100, 150 ms with the bottleneck at 500 Mbit/s (cclab sweep)."""
+def collect_sweep500(C=None, mtus=(1500, 9000)):
+    """J: each algorithm alone at RTT 0, 10, 30, 60, 100, 150 ms with the bottleneck at 500 Mbit/s (cclab sweep), once with
+    the hosts at MTU 1500 (sweep500) and once at 9000 (sweep500_9000); the hosts end at 1500."""
     if C is None:
         import cclab as C
-    put("sweep500", C.sweep(C.SWEEP_RTTS, 500, 20, "a2b", C.ALGOS))
-    C.wan_reset()
+    try:
+        for mtu in mtus:
+            C.mtu_set(mtu)
+            put("sweep500" if mtu == 1500 else f"sweep500_{mtu}", C.sweep(C.SWEEP_RTTS, 500, 20, "a2b", C.ALGOS))
+    finally:
+        C.mtu_set(1500); C.wan_reset()
+
+
+def collect_host_tcp(C=None):
+    """The hosts' TCP settings: kernel, the tcp_* / net.core sysctls, eth1's MTU, offloads and qdisc, from all six."""
+    if C is None:
+        import cclab as C
+    hosts = [n["name"] for n in C.inventory()["nodes"] if n["role"] == "host"]
+    cmd = ("uname -r; echo ---; sysctl -a 2>/dev/null | grep -E '^net[.]ipv4[.]tcp_|^net[.]core[.](rmem_|wmem_|default_qdisc|netdev_max_backlog|optmem_max)'; echo ---; "
+           "cat /sys/class/net/eth1/mtu; echo ---; ethtool -k eth1 | grep -E '^(tcp-segmentation-offload|generic-segmentation-offload|generic-receive-offload|tx-checksumming|rx-checksumming|scatter-gather):'; "
+           "echo ---; tc qdisc show dev eth1")
+    out = {}
+    for h in hosts:
+        rc, txt = C.run(h, cmd, timeout=20)
+        kern, sysc, mtu, off, qd = (x.strip() for x in (txt.split("---") + [""] * 5)[:5])
+        out[h] = {"kernel": kern, "mtu": int(mtu) if mtu.isdigit() else mtu, "qdisc": qd,
+                  "sysctl": dict(l.split(" = ", 1) for l in sysc.splitlines() if " = " in l),
+                  "offloads": dict((a.strip(), b.strip()) for a, b in (l.split(":", 1) for l in off.splitlines() if ":" in l))}
+    put("host_tcp", out)
+
+
+def collect_tcp_mem_check(C=None, rtt=150, rate=500, duration=20):
+    """Does tcp_mem (sized from the hosts' small RAM) bite at 500 Mbit/s on a long path? One CUBIC flow alone, counting
+    TcpExt TCPMemoryPressures on the sender and the receiver around it."""
+    if C is None:
+        import cclab as C
+    def pressures(h):
+        k, v = (l.split() for l in C.run(h, "grep TcpExt: /proc/net/netstat")[1].splitlines()[:2])
+        return int(dict(zip(k, v))["TCPMemoryPressures"])
+    snd = next(n for n in C.inventory()["nodes"] if n["role"] == "host" and n["site"] == "a" and n["cc"] == "cubic")
+    ram = int(C.run(snd["name"], "awk '/MemTotal/{print int($2/1024)}' /proc/meminfo")[1].strip())
+    mem = [int(x) for x in C.run(snd["name"], "cat /proc/sys/net/ipv4/tcp_mem")[1].split()]
+    try:
+        C.mtu_set(1500); wan = C.wan_apply(rtt, rate)["settings"]
+        b = (pressures(snd["name"]), pressures(snd["peer"]))
+        f = C.Flow(snd, duration, time.time()); f.start(); f.join(duration + 60)
+        a = (pressures(snd["name"]), pressures(snd["peer"]))
+    finally:
+        C.wan_reset()
+    put("tcp_mem_check", {"ram_mb": ram, "tcp_mem_pages": mem, "pressure_mb": mem[1] * 4096 / 1e6, "high_mb": mem[2] * 4096 / 1e6,
+                          "rtt_ms": rtt, "rate_mbit": rate, "bdp_mb": wan["bdp_bytes"] / 1e6, "duration": duration, "mbps": f.summary()["mbps"],
+                          "sender_pressures": a[0] - b[0], "receiver_pressures": a[1] - b[1]})
 
 
 def shoot():
@@ -251,8 +299,8 @@ def svg_lines(series, ylabel, xlabel="seconds", marks=(), ymax=None, h=230, w=68
     """series: [(key, label, [(x, y)])] — 2px lines in the algorithm's colour, a legend plus end labels, recessive grid;
     marks: [(x, text)] vertical dashed rules (an RTT change); hline: (y, text) a reference level."""
     left, right, top, bot = 48, 70, 24 if legend else 10, 34
-    xs = [x for _, _, pts in series for x, _ in pts] or [0, 1]
-    ys = [y for _, _, pts in series for _, y in pts] or [0, 1]
+    xs = [x for _, _, pts, *_ in series for x, _ in pts] or [0, 1]
+    ys = [y for _, _, pts, *_ in series for _, y in pts] or [0, 1]
     x0, x1 = 0, max(xs)
     y1 = ymax or nice_max(max(ys) * 1.05)
     X = lambda x: left + (x - x0) / max(1e-9, x1 - x0) * (w - left - right)
@@ -275,10 +323,11 @@ def svg_lines(series, ylabel, xlabel="seconds", marks=(), ymax=None, h=230, w=68
         s.append(f"<line x1='{X(x):.1f}' y1='{top}' x2='{X(x):.1f}' y2='{h - bot}' stroke='#8a8984' stroke-dasharray='4 3'/>")
         s.append(f"<text x='{X(x) + 4:.1f}' y='{top + 10}' fill='#52514e'>{E(text)}</text>")
     ends = []
-    for key, label, pts in series:
+    for key, label, pts, *dash in series:
         if not pts: continue
         d = " ".join(f"{'M' if i == 0 else 'L'}{X(x):.1f},{Y(y):.1f}" for i, (x, y) in enumerate(pts))
-        s.append(f"<path d='{d}' fill='none' stroke='{COL.get(key, '#52514e')}' stroke-width='2' stroke-linejoin='round'/>")
+        da = f" stroke-dasharray='{dash[0]}'" if dash and dash[0] else ""
+        s.append(f"<path d='{d}' fill='none' stroke='{COL.get(key, '#52514e')}' stroke-width='2' stroke-linejoin='round'{da}/>")
         if dots:
             s.extend(f"<circle cx='{X(x):.1f}' cy='{Y(y):.1f}' r='4' fill='{COL.get(key, '#52514e')}' stroke='#fff' stroke-width='2'/>" for x, y in pts)
         ends.append([Y(pts[-1][1]), label, pts[-1][1]])
@@ -289,8 +338,11 @@ def svg_lines(series, ylabel, xlabel="seconds", marks=(), ymax=None, h=230, w=68
         s.append(f"<text x='{w - right + 6}' y='{y + 3.5:.1f}' fill='#0b0b0b'>{E(label)}</text>")
     if legend:
         lx = left
-        for key, label, _ in series:
-            s.append(f"<rect x='{lx}' y='6' width='14' height='3' rx='1.5' fill='{COL.get(key, '#52514e')}'/><text x='{lx + 19}' y='11' fill='#0b0b0b'>{E(label)}</text>")
+        for key, label, _, *dash in series:
+            if dash and dash[0]:
+                s.append(f"<line x1='{lx}' y1='7.5' x2='{lx + 14}' y2='7.5' stroke='{COL.get(key, '#52514e')}' stroke-width='2' stroke-dasharray='{dash[0]}'/><text x='{lx + 19}' y='11' fill='#0b0b0b'>{E(label)}</text>")
+            else:
+                s.append(f"<rect x='{lx}' y='6' width='14' height='3' rx='1.5' fill='{COL.get(key, '#52514e')}'/><text x='{lx + 19}' y='11' fill='#0b0b0b'>{E(label)}</text>")
             lx += 28 + 6.5 * len(label)
     s.append("</svg>")
     return "".join(s)
@@ -398,6 +450,33 @@ def chart_s500_ramp():
                      hline=(d["rate_mbit"], f"bottleneck {d['rate_mbit']:g} Mbit/s"), ymax=nice_max(d["rate_mbit"] * 1.15))
 
 
+def chart_s500_mtu():
+    a, b = j("sweep500"), j("sweep500_9000"); rtts = [p["rtt_ms"] for p in a["points"]]; series = []
+    for cc in a["algos"]:
+        for d, tag, dash in ((b, "9000", None), (a, "1500", "5 4")):
+            series.append((cc, f"{NAME[cc]} {tag}", [(p["rtt_ms"], next(f for f in p["flows"] if f["cc"] == cc)["mbps"]) for p in d["points"]], dash))
+    return svg_lines(series, "Mbit/s (whole 20 s run)", xlabel="emulated RTT, ms", xticks=rtts, dots=True, ymax=nice_max(a["rate_mbit"] * 1.05), h=260,
+                     hline=(a["rate_mbit"], f"bottleneck {a['rate_mbit']:g} Mbit/s"))
+
+
+def table_s500_mtu():
+    a, b = j("sweep500"), j("sweep500_9000"); rows = []
+    for pa, pb in zip(a["points"], b["points"]):
+        va, vb = {f["cc"]: f for f in pa["flows"]}, {f["cc"]: f for f in pb["flows"]}
+        cells = ""
+        for c in a["algos"]:
+            gain = (vb[c]["mbps"] / va[c]["mbps"] - 1) * 100 if va[c]["mbps"] else 0
+            cells += (f"<td class='num'>{va[c]['mbps']:.0f}</td><td class='num'>{vb[c]['mbps']:.0f}</td><td class='num'>{gain:+.0f} %</td>"
+                      f"<td class='num'>{va[c]['retransmits']} / {vb[c]['retransmits']}</td>")
+        rows.append(f"<tr><td class='num'>{pa['rtt_ms']:g}</td>{cells}</tr>")
+    head = "".join(f"<th colspan=4><span class='sw' style='background:{COL[c]}'></span>{NAME[c]}</th>" for c in a["algos"])
+    sub = "<th class='num'>1500</th><th class='num'>9000</th><th class='num'>gain</th><th class='num'>retr 1500/9000</th>" * len(a["algos"])
+    return ("<table class='tight'><tr><th rowspan=2 class='num'>RTT (ms)</th>" + head + "</tr><tr>" + sub + "</tr>" + "".join(rows) + "</table>"
+            f"<p class='cap'>Mbit/s over 20 s, each alone, bottleneck {a['rate_mbit']:g} Mbit/s, buffer 1 × BDP; hosts at MTU 1500 (MSS {a['points'][0]['flows'][0]['mss']}) and 9000 "
+            f"(MSS {b['points'][0]['flows'][0]['mss']}). Two separate series, run one after the other.</p>")
+
+
+CHARTS["s500_mtu"] = chart_s500_mtu
 CHARTS["s500_mbps"] = lambda: chart_s500("mbps")
 CHARTS["s500_queue"] = lambda: chart_s500("queue")
 CHARTS["s500_ramp"] = chart_s500_ramp
@@ -471,6 +550,101 @@ def table_s500():
             "<tr>" + sub + "</tr>" + "".join(rows) + "</table>")
 
 
+HOST_TCP_KEYS = [   # (sysctl, what it does) — the settings that shape a bulk flow, in the order a reader needs them
+    ("net.ipv4.tcp_congestion_control", "the algorithm: one per host pair, the only setting that differs between the six"),
+    ("net.ipv4.tcp_available_congestion_control", "modules loaded (tcp_bbr by the lab; Reno is built in)"),
+    ("net.core.default_qdisc", "qdisc for new interfaces; eth1 also gets fq explicitly — fq does the pacing BBR relies on"),
+    ("net.ipv4.tcp_rmem", "receive buffer min / default / max, bytes; autotuning grows a socket up to max"),
+    ("net.ipv4.tcp_wmem", "send buffer min / default / max, bytes"),
+    ("net.core.rmem_max", "cap for SO_RCVBUF set by an application"),
+    ("net.core.wmem_max", "cap for SO_SNDBUF set by an application"),
+    ("net.ipv4.tcp_mem", "all TCP sockets together, in 4 KiB pages: low / pressure / high; sized by the kernel from RAM"),
+    ("net.ipv4.tcp_moderate_rcvbuf", "receive-buffer autotuning on"),
+    ("net.ipv4.tcp_adv_win_scale", "share of the receive buffer advertised as window (1 = half)"),
+    ("net.ipv4.tcp_window_scaling", "RFC 7323 window scaling: windows above 64 KB"),
+    ("net.ipv4.tcp_timestamps", "RFC 7323 timestamps: RTT samples on every ACK, PAWS"),
+    ("net.ipv4.tcp_sack", "selective ACKs"),
+    ("net.ipv4.tcp_dsack", "duplicate SACKs (detects spurious retransmits)"),
+    ("net.ipv4.tcp_recovery", "1 = RACK-TLP loss detection (time-based, not 3 dup-ACKs)"),
+    ("net.ipv4.tcp_early_retrans", "3 = tail loss probe on"),
+    ("net.ipv4.tcp_frto", "F-RTO: detects spurious retransmission timeouts"),
+    ("net.ipv4.tcp_reordering", "initial reordering tolerance, segments"),
+    ("net.ipv4.tcp_ecn", "2 = accept ECN when the peer asks, do not ask (the WAN does not mark anyway)"),
+    ("net.ipv4.tcp_no_metrics_save", "1 = forget cwnd / ssthresh / RTT of a finished connection, so each run starts clean"),
+    ("net.ipv4.tcp_slow_start_after_idle", "1 = shrink cwnd after an idle period (irrelevant to bulk iperf3 flows)"),
+    ("net.ipv4.tcp_pacing_ss_ratio", "pacing rate in slow start, % of cwnd/RTT"),
+    ("net.ipv4.tcp_pacing_ca_ratio", "pacing rate in congestion avoidance, % of cwnd/RTT"),
+    ("net.ipv4.tcp_limit_output_bytes", "TSQ: bytes a socket may have queued below TCP (qdisc + NIC)"),
+    ("net.ipv4.tcp_notsent_lowat", "unsent bytes allowed in the send buffer (unlimited)"),
+    ("net.ipv4.tcp_rto_min_us", "minimum retransmission timeout, µs"),
+    ("net.ipv4.tcp_min_rtt_wlen", "window for the min-RTT filter, s"),
+    ("net.ipv4.tcp_mtu_probing", "0 = no packetisation-layer PMTU discovery (the path MTU is known)"),
+    ("net.ipv4.tcp_fastopen", "1 = TCP Fast Open as a client"),
+    ("net.core.netdev_max_backlog", "receive backlog per CPU, packets"),
+]
+
+
+def host_tcp_lab_keys():
+    keys = set()
+    for l in (LAB / "nodes" / "a-cubic" / "user-data").read_text().splitlines():
+        l = l.strip()
+        if " = " in l and l.startswith("net."): keys.add(l.split(" = ")[0])
+    return keys
+
+
+def table_host_tcp():
+    d = j("host_tcp"); hs = list(d); lab = host_tcp_lab_keys(); rows = []
+    for k, what in HOST_TCP_KEYS:
+        vals = {h: d[h]["sysctl"].get(k, "–") for h in hs}
+        if len(set(vals.values())) == 1: v = E(next(iter(vals.values())).replace("\t", " "))
+        else: v = " · ".join(sorted(set(vals.values()), key=["cubic", "bbr", "reno"].index if set(vals.values()) <= {"cubic", "bbr", "reno"} else str))
+        if k == "net.ipv4.tcp_mem":
+            v += "<br><span class='small'>= " + " / ".join(f"{int(x) * 4096 / 1e6:.1f}" for x in vals[hs[0]].split()) + " MB</span>"
+        rows.append(f"<tr><td class='mono'>{E(k.replace('net.ipv4.', '').replace('net.core.', 'core.'))}</td><td class='mono'>{v}</td>"
+                    f"<td>{'lab' if k in lab else 'kernel'}</td><td class='small'>{E(what)}</td></tr>")
+    h0 = d[hs[0]]
+    rows.append(f"<tr><td class='mono'>eth1 MTU</td><td class='mono'>{' · '.join(sorted({str(d[h]['mtu']) for h in hs}))}</td><td>lab</td><td class='small'>1500 by default; 9000 with lab.sh mtu set 9000 (section 15)</td></tr>")
+    off = h0["offloads"]
+    rows.append(f"<tr><td class='mono'>eth1 offloads</td><td class='mono'>TSO {off.get('tcp-segmentation-offload', '?').split()[0]}, GSO {off.get('generic-segmentation-offload', '?').split()[0]}, GRO {off.get('generic-receive-offload', '?').split()[0]}</td>"
+                "<td>kernel</td><td class='small'>virtio-net segmentation and receive offloads: TCP hands the NIC up to 64 KB at a time; wanem has them off so tbf sees real packets</td></tr>")
+    return ("<table><tr><th>setting</th><th>value</th><th>set by</th><th>what it does</th></tr>" + "".join(rows) + "</table>"
+            f"<p class='cap'>Read from all six hosts ({E(', '.join(hs))}) on {time.strftime('%B %-d, %Y')}, kernel {E(h0['kernel'])}. The values are identical on all six except the algorithm. "
+            "“lab”: set by /etc/sysctl.d/90-tcpcc.conf or /etc/local.d/tcpcc.start from cloud-init; “kernel”: Alpine’s default.</p>")
+
+
+def host_tcp_conf():
+    """The two files cloud-init writes for the TCP setup, cut out of a-cubic's user-data and dedented."""
+    import textwrap
+    ud = (LAB / "nodes" / "a-cubic" / "user-data").read_text().split("\n  - path: ")
+    out = []
+    for path in ("/etc/sysctl.d/90-tcpcc.conf", "/etc/local.d/tcpcc.start"):
+        blk = next(b for b in ud if b.startswith(path))
+        body = blk.split("content: |\n", 1)[1].split("\nruncmd:")[0]
+        out.append(f"# {path}\n" + textwrap.dedent(body).rstrip())
+    return "\n\n".join(out)
+
+
+def tcp_mem_note():
+    p = DATA / "tcp_mem_check.json"
+    if not p.exists(): return ""
+    c = json.loads(p.read_text())
+    if not c["sender_pressures"] and not c["receiver_pressures"]:
+        return (f"<div class='box'><b>tcp_mem.</b> The kernel sizes it from RAM ({c['ram_mb']} MB on these hosts): pressure at {c['pressure_mb']:.1f} MB, "
+                f"hard limit {c['high_mb']:.1f} MB for all TCP sockets together. A CUBIC flow alone at {c['rtt_ms']} ms and {c['rate_mbit']} Mbit/s "
+                f"(BDP {c['bdp_mb']:.1f} MB) did not reach it: no TCPMemoryPressures on either end in {c['duration']} s.</div>")
+    return (f"<div class='box warn'><b>tcp_mem is small on these hosts.</b> The kernel sizes it from RAM, and the hosts have {c['ram_mb']} MB: "
+            f"TCP as a whole enters memory pressure at {c['pressure_mb']:.1f} MB and stops growing buffers at {c['high_mb']:.1f} MB. That is plenty at 100 Mbit/s "
+            f"(BDP 3.75 MB at 300 ms), but not at 500 Mbit/s on long paths: one CUBIC flow alone at {c['rtt_ms']} ms (BDP {c['bdp_mb']:.1f} MB) "
+            f"put the sender into pressure {c['sender_pressures']} times and the receiver {c['receiver_pressures']} times in {c['duration']} s (<span class='mono'>TcpExt TCPMemoryPressures</span>) "
+            f"and got {c['mbps']:.0f} Mbit/s. Under pressure the kernel stops growing socket buffers, so the 100 and 150 ms points of section 16 may be partly limited by the hosts, not only by the algorithm. "
+            "Raising the hosts' RAM or <span class='mono'>net.ipv4.tcp_mem</span> would remove the limit.</div>")
+
+
+def text_host_tcp_all():
+    d = j("host_tcp"); h = next(iter(d))
+    return "\n".join(f"{k} = {v.replace(chr(9), ' ')}" for k, v in sorted(d[h]["sysctl"].items()))
+
+
 TABLES = {
     "compete_default": lambda: flows_table(j("compete_default")),
     "compete_shallow": lambda: flows_table(j("compete_shallow")),
@@ -478,7 +652,7 @@ TABLES = {
     "solo_default": lambda: solo_table("solo_default"),
     "solo_bloat": lambda: solo_table("solo_bloat"),
     "solo_loss": lambda: solo_table("solo_loss"),
-    "sweep": table_sweep, "rttchange": table_rttchange, "mtu": table_mtu, "s500": table_s500,
+    "sweep": table_sweep, "rttchange": table_rttchange, "mtu": table_mtu, "s500": table_s500, "host_tcp": table_host_tcp, "s500_mtu": table_s500_mtu,
 }
 
 
@@ -527,6 +701,8 @@ def build():
     s = re.sub(r"\{\{chart:(\w+)\}\}", lambda m: CHARTS[m.group(1)](), s)
     s = re.sub(r"\{\{table:(\w+)\}\}", lambda m: TABLES[m.group(1)](), s)
     s = re.sub(r"\{\{img:([\w-]+)\}\}", lambda m: img(m.group(1)), s)
+    s = s.replace("{{host_tcp_all}}", E(text_host_tcp_all())).replace("{{host_tcp_conf}}", E(host_tcp_conf())).replace("{{tcp_mem_note}}", tcp_mem_note())
+    s = s.replace("{{json_qdisc}}", E(next(iter(j("host_tcp").values()))["qdisc"]))
     s = re.sub(r"\{\{text:(\w+)\}\}", lambda m: E((DATA / f"{m.group(1)}.txt").read_text().rstrip()), s)
     s = re.sub(r"\{\{json:(\w+)\}\}", lambda m: E(json.dumps(j(m.group(1)), indent=1)), s)
     s = re.sub(r"\{\{val:([\w.]+)\}\}", lambda m: E(val(m.group(1))), s)
@@ -545,5 +721,5 @@ def build():
 if __name__ == "__main__":
     if "--refresh" in sys.argv: collect()
     elif "--shots" in sys.argv: shoot()
-    elif "--sweep500" in sys.argv: collect_sweep500()
+    elif "--sweep500" in sys.argv: collect_host_tcp(); collect_sweep500(); collect_tcp_mem_check()
     build()

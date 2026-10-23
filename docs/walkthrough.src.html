@@ -50,7 +50,7 @@
   <div>13. Walkthrough G — moving the RTT under a flow</div>
   <div>14. Walkthrough H — late arrivals</div>
   <div>15. Walkthrough I — jumbo frames</div>
-  <div>16. Walkthrough J — 500 Mbit/s, RTT 0 to 150 ms</div>
+  <div>16. Walkthrough J — 500 Mbit/s, RTT 0 to 150 ms, MTU 1500 / 9000</div>
   <div>17. The portal</div>
   <div>18. Monitoring and the Lab Hub</div>
   <div>19. Tests</div>
@@ -61,6 +61,7 @@
   <div>Appendix A — lab.sh</div>
   <div>Appendix B — the WAN emulator script</div>
   <div>Appendix C — lab.conf</div>
+  <div>Appendix D — every TCP setting on the hosts</div>
 </div>
 
 <!-- ================================================================== 1 -->
@@ -192,6 +193,13 @@
   <li>An iperf3 server on 5201; the flows are <span class="mono">iperf3 -c &lt;peer&gt; --json-stream</span> started over SSH, parsed second by second.</li>
 </ul>
 
+<h3 class="page">The hosts' TCP settings</h3>
+<p>Alpine 3.22's kernel defaults plus seven lines the lab sets from cloud-init. The table lists the settings that shape a bulk TCP flow, read live from the six hosts; Appendix D lists every <span class="mono">net.ipv4.tcp_*</span> and <span class="mono">net.core</span> buffer value.</p>
+{{table:host_tcp}}
+<p>What the lab sets, <span class="mono">/etc/sysctl.d/90-tcpcc.conf</span> (a-cubic's; the other hosts differ only in the first line), applied with the MTU, fq and the iperf3 server by <span class="mono">/etc/local.d/tcpcc.start</span> at boot:</p>
+<pre>{{host_tcp_conf}}</pre>
+{{tcp_mem_note}}
+
 <h3>MTU</h3>
 <p>r1 and r2's eth1/eth2, wanem's eth1/eth2/br0 and the four data bridges are MTU 9000, always. The hosts' eth1 is 1500 by default and switches to 9000 and back, all six together. So the infrastructure never fragments or drops anything a host sends, and the only thing the switch changes is the segment size TCP negotiates (MSS 1448 or 8948). The OOB network stays at 1500.</p>
 
@@ -319,12 +327,14 @@
 <div class="box warn"><b>Change the MTU between runs.</b> A TCP connection keeps the MSS it negotiated at its start, so the portal refuses the switch while a run is going. The hosts all switch together: mixed MTUs would only measure path-MTU clamping, and the NMS alerts on it.</div>
 
 <!-- ================================================================== 16 -->
-<h2 class="page">16. Walkthrough J — 500 Mbit/s, RTT 0 to 150 ms, each alone</h2>
-<p>A clean baseline for each algorithm on its own, with nothing to compete against: the bottleneck raised to <b>500 Mbit/s</b>, the RTT stepped through <b>0, 10, 30, 60, 100 and 150 ms</b>, and at every step CUBIC, then BBR, then Reno sends alone for 20 s. Buffer 1 × BDP (at 0 ms that is zero, so tbf's floor of four jumbo frames, 36 KB, applies), no loss, hosts at MTU 1500. One command does the whole series and puts the WAN back as it found it:</p>
-<pre>./lab.sh flows sweep                          # = --rtts 0,10,30,60,100,150 --rate 500 --duration 20
+<h2 class="page">16. Walkthrough J — 500 Mbit/s, RTT 0 to 150 ms, each alone, MTU 1500 and 9000</h2>
+<p>A clean baseline for each algorithm on its own, with nothing to compete against: the bottleneck raised to <b>500 Mbit/s</b>, the RTT stepped through <b>0, 10, 30, 60, 100 and 150 ms</b>, and at every step CUBIC, then BBR, then Reno sends alone for 20 s. Buffer 1 × BDP (at 0 ms that is zero, so tbf's floor of four jumbo frames, 36 KB, applies), no loss. The series ran twice: first with the hosts at <b>MTU 1500</b> (the default), then at <b>MTU 9000</b>. The hosts' TCP settings are in section 4 and Appendix D. One command does a series and puts the WAN back as it found it:</p>
+<pre>./lab.sh mtu set 1500                         # or 9000
+./lab.sh flows sweep                          # = --rtts 0,10,30,60,100,150 --rate 500 --duration 20
 ./lab.sh flows sweep --algos reno --rtts 100   # any subset</pre>
 <p>The Robot suite <span class="mono">05_rtt_series</span> runs the same series as one test per algorithm (15 s per point) and asserts the rate at every RTT (section 19).</p>
-<div class="fig"><div class="t">Throughput of each algorithm alone, by RTT (bottleneck 500 Mbit/s, 20 s per point)</div>{{chart:s500_mbps}}</div>
+<h3>Hosts at MTU 1500</h3>
+<div class="fig"><div class="t">Throughput of each algorithm alone, by RTT (bottleneck 500 Mbit/s, 20 s per point, MTU 1500)</div>{{chart:s500_mbps}}</div>
 {{table:s500}}
 <p class="cap">ping avg: a-{{val:sweep500.algos.0}} → its peer, measured before the flows at each step (the set RTT plus the VMs' own ~1 ms). Buffer: tbf's queue, 1 × BDP at 500 Mbit/s. retr: TCP retransmits over the 20 s.</p>
 <p><b>Up to 60 ms the algorithm does not matter for throughput.</b> All three carry 444–470 Mbit/s. That is the ceiling: tbf counts every 1514-byte frame against the 500 Mbit/s and iperf3 reports the 1448 bytes of payload in it, so ~478 Mbit/s of goodput is the most any TCP can show here. What differs is the cost: BBR gets the same rate with far more retransmits ({{val:sweep500.points.0.flows.1.retransmits}} at 0 ms, against {{val:sweep500.points.0.flows.0.retransmits}} for CUBIC) because it probes for bandwidth by pacing above its estimate and simply tolerates the losses.</p>
@@ -333,7 +343,19 @@
 <p><b>At 150 ms the start-up dominates a 20 s run.</b> Every flow needs a few seconds (tens of RTTs) to reach the 9.4 MB BDP, so the averages drop to ~390–420 Mbit/s even though each runs at 430–540 once it is up. CUBIC overshot in slow start and stalled for a second (0 Mbit/s at second 4) before settling; BBR's and Reno's ramps were clean. No packet was dropped at the bottleneck at 150 ms (the buffer, 9.4 MB, never filled in 20 s); the retransmits there are from the slow-start bursts and recovery.</p>
 <div class="fig"><div class="t">Queueing delay each flow added on top of the idle path (mean smoothed RTT − ping min)</div>{{chart:s500_queue}}</div>
 <p><b>The queue tells the algorithms apart.</b> Reno keeps the smallest standing queue at every RTT: its slow, linear growth rarely gets far into the buffer. CUBIC fills it — ~50 ms extra at 100 ms. BBR adds more than either at short RTTs (its probing phases push 25 % above the estimate, and with 1 × BDP of buffer they show), but less than CUBIC on long paths.</p>
-<div class="box"><b>Why 500 Mbit/s and not 100.</b> At 100 Mbit/s the host and VM overhead is negligible and every algorithm sits on the bottleneck; at 500 the BDP at 150 ms grows to 9.4 MB, which is where window growth rules (Reno's linear increase, slow start's length) start to show in a single flow. The hosts' 32 MB socket buffers cover it; at 1 Gbit/s × 300 ms they would not.</div>
+
+<h3>Hosts at MTU 9000</h3>
+<p>The same series with the hosts switched to jumbo frames (MSS 8948); r1, r2 and wanem were 9000 throughout. Solid lines: 9000; dashed: the 1500 run above.</p>
+<div class="fig"><div class="t">Throughput by RTT, MTU 9000 (solid) against 1500 (dashed)</div>{{chart:s500_mtu}}</div>
+{{table:s500_mtu}}
+<p><b>At 9000 every algorithm sits at the ceiling at every RTT.</b> 450–493 Mbit/s from 0 to 150 ms, against 392–470 at 1500. The ceiling itself is higher — 8948 bytes of payload per 9014 on the wire is 99.3 %, so ~496 Mbit/s of goodput, against ~478 at 1500 — which explains 3–4 % of the gain at short RTTs. The rest is at the long RTTs, and it comes from losing less:</p>
+<ul>
+  <li><b>Retransmits fall 4–20× from 10 to 100 ms</b> (not at 0 ms, where the 36 KB buffer holds only four jumbo frames and Reno retransmits more). BBR goes from {{val:sweep500.points.2.flows.1.retransmits}} to {{val:sweep500_9000.points.2.flows.1.retransmits}} at 30 ms; at 150 ms CUBIC and BBR retransmit nothing. Six times fewer packets for the same bytes means six times fewer packets to queue, burst and drop.</li>
+  <li><b>Reno no longer stalls.</b> Its window, counted in segments, is six times smaller for the same bytes, and each one-segment-per-RTT step adds six times as many bytes: recovering half a 6.25 MB BDP takes ~350 RTTs instead of ~2 200. At 100 ms Reno kept {{val:sweep500_9000.points.4.flows.2.mbps}} Mbit/s.</li>
+  <li><b>Slow start reaches the BDP sooner</b> (each doubling is in bigger segments, and the initial window of 10 segments is 89 KB instead of 14 KB), so the 150 ms averages are barely below the others.</li>
+</ul>
+<p>The price is queueing: with fewer losses the loss-based algorithms sit in the buffer longer — CUBIC's mean RTT at 150 ms is {{val:sweep500_9000.points.5.flows.0.rtt_ms.mean}} ms at 9000 against {{val:sweep500.points.5.flows.0.rtt_ms.mean}} at 1500.</p>
+<div class="box"><b>Why 500 Mbit/s and not 100.</b> At 100 Mbit/s the host and VM overhead is negligible and every algorithm sits on the bottleneck; at 500 the BDP at 150 ms grows to 9.4 MB, which is where window growth rules (Reno's linear increase, slow start's length) start to show in a single flow. The hosts' 32 MB socket buffers cover it on paper; the hosts' small tcp_mem does not always (section 4).</div>
 
 <!-- ================================================================== 17 -->
 
@@ -401,6 +423,8 @@
 <tr><td class="num">8</td><td><b>Jumbo frames gain ~4 %</b> on a single flow, mostly header overhead, with far fewer retransmits.</td><td>§15</td></tr>
 <tr><td class="num">9</td><td><b>At 500 Mbit/s, alone, all three reach ~460 Mbit/s up to 60 ms RTT</b> — the goodput ceiling — BBR with roughly 10–40× the retransmits of CUBIC at RTTs of 30 ms and below.</td><td>§16</td></tr>
 <tr><td class="num">10</td><td><b>Reno cannot recover on long fat paths:</b> one loss at 100 ms × 500 Mbit/s left it at ~260 Mbit/s for the rest of the run (minutes to regrow); CUBIC and BBR held ~450.</td><td>§16</td></tr>
+<tr><td class="num">11</td><td><b>Jumbo frames lift all three to the 500 Mbit/s ceiling at every RTT up to 150 ms</b>, with 4–20× fewer retransmits from 10 to 100 ms and none for CUBIC and BBR at 150 ms; Reno's long-path stall disappears.</td><td>§16</td></tr>
+<tr><td class="num">12</td><td><b>The hosts' tcp_mem (sized from 217 MB of RAM) bites at 500 Mbit/s × 150 ms:</b> the sender hit TCP memory pressure 95 times in 20 s. The long-RTT points at MTU 1500 are partly host-limited.</td><td>§4</td></tr>
 </table>
 <div class="box"><b>How far to trust these.</b> One run per setting, 20–40 s each, on VMs sharing a host: the direction and the size of each effect are reproducible (the Robot suites assert them on every run), the exact Mbit/s are not — a rerun moves CUBIC's and Reno's single-digit shares by a few Mbit/s. Linux 6.12's BBR is v1; BBRv3 behaves differently in findings 2, 5 and 6, by design.</div>
 
@@ -454,6 +478,11 @@
 
 <h2 class="page">Appendix C — lab.conf</h2>
 <pre>{{file:lab.conf}}</pre>
+
+<h2 class="page">Appendix D — every TCP setting on the hosts</h2>
+<p><span class="mono">sysctl -a | grep -E '^net.ipv4.tcp_|^net.core.(rmem_|wmem_|default_qdisc|netdev_max_backlog|optmem_max)'</span> on a-cubic; identical on all six hosts except <span class="mono">tcp_congestion_control</span>. eth1's qdisc:</p>
+<pre>{{json_qdisc}}</pre>
+<pre class="cols">{{host_tcp_all}}</pre>
 
 </body>
 </html>

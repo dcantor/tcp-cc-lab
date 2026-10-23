@@ -1,0 +1,17 @@
+{
+ "ram_mb": 217,
+ "tcp_mem_pages": [
+  2418,
+  3227,
+  4836
+ ],
+ "pressure_mb": 13.217792,
+ "high_mb": 19.808256,
+ "rtt_ms": 150,
+ "rate_mbit": 500,
+ "bdp_mb": 9.375,
+ "duration": 20,
+ "mbps": 434.98,
+ "sender_pressures": 95,
+ "receiver_pressures": 0
+}
