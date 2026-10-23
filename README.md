@@ -32,7 +32,9 @@ python3 tools/bbr_experiment.py --trials 1 --duration 30 --bitrate 500M   # the 
 ```
 
 Portal: http://192.168.50.231:8112 (user unit `tcp-cc-lab-webapp`, Lab Hub sign-in). The RTT slider (0–300 ms,
-default 30) applies when released, with `tc qdisc change`, so a running flow keeps going and the chart marks the change.
+default 30) applies when released, with `tc qdisc change`, so a running flow keeps going and the chart marks the change. The bottleneck rate slider goes from 10 Mbit/s to 5 Gbit/s.
+The VMs forward about 2–2.5 Gbit/s at host MTU 1500 and 3.5–4 Gbit/s at 9000, so above that the path is the limit,
+not the bottleneck; the bottleneck buffer is capped at 128 MB.
 
 **Live test** (the portal's default flow mode): the chosen algorithms run at once until you press Stop (at most 2–30
 min). Four charts update every second, with a time grid every 5 s: throughput,

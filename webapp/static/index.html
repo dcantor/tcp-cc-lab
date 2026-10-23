@@ -89,8 +89,8 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
         <input type="range" id="rtt" min="0" max="300" step="1" value="30" list="rttTicks" aria-describedby="rttVal">
         <div class="big" id="rttVal">30 ms <small>15 + 15</small></div>
         <label for="rate">Bottleneck rate</label>
-        <div class="row"><select id="rate"><option>10</option><option>20</option><option>50</option><option selected>100</option><option>200</option><option>500</option><option>1000</option></select><span class="mute">Mbit/s</span></div>
-        <div></div>
+        <input type="range" id="rate" min="0" max="17" step="1" value="5" aria-describedby="rateVal">
+        <div class="big" id="rateVal">100 <small>Mbit/s</small></div>
         <label for="loss">Random loss</label>
         <input type="range" id="loss" min="0" max="14" step="1" value="0" aria-describedby="lossVal">
         <div class="big" id="lossVal">0 % <small>each way</small></div>
@@ -113,7 +113,7 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
         <div class="kpi"><b>Bottleneck drops (A → B)</b><span id="kDrop">–</span></div>
         <div class="kpi"><b>B → A (acks, or B senders)</b><span id="kThrB">–</span></div>
       </div>
-      <p class="mute small" style="margin:10px 0 0">The MTU switch sets all six hosts' eth1 (between runs: a flow keeps the MSS it started with); r1, r2 and wanem's links are always 9000. Changes apply when you let go of the slider, in place (<code>tc qdisc change</code>): a running flow sees the new RTT on its next packets and keeps going. The VMs add about 1 ms of their own on top of the emulated RTT.</p>
+      <p class="mute small" style="margin:10px 0 0">The MTU switch sets all six hosts' eth1 (between runs: a flow keeps the MSS it started with); r1, r2 and wanem's links are always 9000. Changes apply when you let go of the slider, in place (<code>tc qdisc change</code>): a running flow sees the new RTT on its next packets and keeps going. The VMs add about 1 ms of their own on top of the emulated RTT. The bottleneck goes to 5 Gbit/s, but the VMs themselves top out around 2–2.5 Gbit/s at host MTU 1500 and 3.5–4 Gbit/s at 9000 (measured at 10 ms; nothing dropped at the shaper): above that, the path, not the bottleneck, is the limit. The buffer is capped at 128 MB (wanem has 512 MB of RAM).</p>
     </section>
 
     <section class="card">
@@ -128,7 +128,7 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
       </div>
       <div class="ctl" style="margin-top:12px">
         <label for="br">Sender bit rate <span class="small">(iperf3 -b, per flow)</span></label>
-        <input type="range" id="br" min="0" max="16" step="1" value="11" aria-describedby="brVal">
+        <input type="range" id="br" min="0" max="22" step="1" value="11" aria-describedby="brVal">
         <div class="big" id="brVal">500 <small>Mbit/s</small></div>
       </div>
       <p class="mute small" id="liveHelp" style="margin:6px 0 0">Live: the flows run until you press Stop. Move the RTT, loss, rate or buffer controls above and the running flows see the change at once. iperf3 cannot change <code>-b</code> during a test, so moving the bit-rate slider ends the flows and starts new ones with the new <code>-b</code> (a new TCP connection, from slow start); the chart marks where.</p>
@@ -317,15 +317,19 @@ function flowTable(r) {
 
 // ---- WAN controls --------------------------------------------------------------------------------------------------
 function showRtt(v) { $('#rttVal').innerHTML = `${v} ms <small>${+(v / 2).toFixed(1)} + ${+(v / 2).toFixed(1)}</small>`; }
+const RATE = [10, 20, 50, 75, 100, 200, 300, 500, 750, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000];   // Mbit/s — the bottleneck slider's stops
+const rateText = v => v >= 1000 ? `${+(v / 1000).toFixed(2)} <small>Gbit/s</small>` : `${v} <small>Mbit/s</small>`;
+const bytesText = b => b >= 1e6 ? `${+(b / 1e6).toFixed(1)} MB` : `${(b / 1000).toFixed(0)} kB`;
+function showRate(v) { $('#rateVal').innerHTML = rateText(v); }
 const LOSS = [0, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 3, 5, 10];   // % — the slider's stops (fine where it matters)
 const nearest = (arr, v) => arr.reduce((b, c, i) => Math.abs(c - v) < Math.abs(arr[b] - v) ? i : b, 0);
 function showLoss(v) { $('#lossVal').innerHTML = `${+v} % <small>each way${v ? ` · 1 in ${Math.round(100 / v).toLocaleString()}` : ''}</small>`; }
 function syncControls(s) {
-  if (!s || $('#rtt').dataset.drag || $('#loss').dataset.drag) return;
+  if (!s || $('#rtt').dataset.drag || $('#loss').dataset.drag || $('#rate').dataset.drag) return;
   $('#rtt').value = s.rtt_ms; showRtt(s.rtt_ms); $('#loss').value = nearest(LOSS, s.loss_pct); showLoss(s.loss_pct);
-  const r = String(s.rate_mbit); if (![...$('#rate').options].some(o => o.value === r)) $('#rate').add(new Option(r, r)); $('#rate').value = r;
+  if (!$('#rate').dataset.drag) { $('#rate').value = nearest(RATE, s.rate_mbit); showRate(s.rate_mbit); }
   BUF = s.buffer_bdp; document.querySelectorAll('#bufSeg button').forEach(b => b.classList.toggle('on', +b.dataset.b === +BUF));
-  $('#bufBytes').textContent = `= ${(s.queue_bytes / 1000).toFixed(0)} kB (${(s.queue_bytes * 8 / (s.rate_mbit * 1000)).toFixed(1)} ms at ${s.rate_mbit} Mbit/s)`;
+  $('#bufBytes').textContent = `= ${bytesText(s.queue_bytes)} (${(s.queue_bytes * 8 / (s.rate_mbit * 1000)).toFixed(1)} ms at ${s.rate_mbit} Mbit/s)` + (s.queue_bytes >= 134217728 ? ' — capped at 128 MB' : '');
 }
 async function applyWan(body) {
   $('#wanMsg').textContent = 'applying…';
@@ -336,7 +340,8 @@ $('#rtt').addEventListener('input', e => { e.target.dataset.drag = 1; showRtt(e.
 $('#rtt').addEventListener('change', e => { delete e.target.dataset.drag; applyWan({rtt_ms: +e.target.value}); });
 $('#loss').addEventListener('input', e => { e.target.dataset.drag = 1; showLoss(LOSS[+e.target.value]); });
 $('#loss').addEventListener('change', e => { delete e.target.dataset.drag; applyWan({loss_pct: LOSS[+e.target.value]}); });
-$('#rate').addEventListener('change', e => applyWan({rate_mbit: +e.target.value}));
+$('#rate').addEventListener('input', e => { e.target.dataset.drag = 1; showRate(RATE[+e.target.value]); });
+$('#rate').addEventListener('change', e => { delete e.target.dataset.drag; applyWan({rate_mbit: RATE[+e.target.value]}); });
 document.querySelectorAll('#bufSeg button').forEach(b => b.onclick = () => applyWan({buffer_bdp: +b.dataset.b}));
 $('#resetBtn').onclick = () => applyWan({reset: true});
 $('#pingBtn').onclick = async () => { $('#pingOut').textContent = 'pinging…';
@@ -366,7 +371,7 @@ async function pollWan() {
         $('#kDrop').textContent = `${Math.max(0, Math.round((w.a2b.drops - lastWan.a2b.drops) / dt))} /s · ${w.a2b.drops} total`;
       }
       const qms = w.a2b.backlog_bytes * 8 / (w.settings.rate_mbit * 1000);
-      $('#kQ').textContent = `${(w.a2b.backlog_bytes / 1000).toFixed(0)} kB · ${qms.toFixed(1)} ms`;
+      $('#kQ').textContent = `${bytesText(w.a2b.backlog_bytes)} · ${qms.toFixed(1)} ms`;
       if ((!lastWan || lastWan.settings.applied !== w.settings.applied)) syncControls(w.settings);
       lastWan = w;
     }
@@ -428,9 +433,9 @@ async function refresh() {
 }
 
 // ---- runs ------------------------------------------------------------------------------------------------------------
-const BR = [1, 2, 5, 10, 20, 50, 100, 150, 200, 300, 400, 500, 600, 700, 800, 1000, 0];   // Mbit/s; 0 = no -b
+const BR = [1, 2, 5, 10, 20, 50, 100, 150, 200, 300, 400, 500, 600, 700, 800, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 0];   // Mbit/s; 0 = no -b
 const brText = v => v ? `${v}M` : 'unlimited';
-function showBr(v) { $('#brVal').innerHTML = v ? `${v} <small>Mbit/s</small>` : 'unlimited <small>no -b</small>'; }
+function showBr(v) { $('#brVal').innerHTML = v ? rateText(v) : 'unlimited <small>no -b</small>'; }
 const liveGoing = () => RUN && RUN.mode === 'live' && ['queued', 'running'].includes(RUN.status);
 $('#br').addEventListener('input', e => { e.target.dataset.drag = 1; showBr(BR[+e.target.value]); });
 $('#br').addEventListener('change', async e => {

@@ -50,7 +50,7 @@ def log(*a): print(*a, file=sys.stderr, flush=True)
 
 
 # ---- WAN emulator ----------------------------------------------------------------------------------------------------
-LIMITS = {"rtt_ms": (0, 300), "rate_mbit": (1, 1000), "loss_pct": (0, 20), "buffer_bdp": (0.05, 16)}
+LIMITS = {"rtt_ms": (0, 300), "rate_mbit": (1, 5000), "loss_pct": (0, 20), "buffer_bdp": (0.05, 16)}
 
 
 def wan_stats():

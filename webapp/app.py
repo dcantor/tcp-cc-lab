@@ -40,7 +40,7 @@ VERSION = (LAB / "VERSION").read_text().strip()
 SUITES = sorted(p.stem for p in (LAB / "tests" / "suites").glob("*.robot"))
 FLOW_MODES = ("compete", "solo")
 LIVE_MODES = (*FLOW_MODES, "live")   # runs that draw per-second samples
-BITRATE_MAX = 1000   # Mbit/s; 0 = iperf3 without -b
+BITRATE_MAX = 5000   # Mbit/s; 0 = iperf3 without -b
 
 app = FastAPI(title="tcp-cc-lab portal API", version="1.0", docs_url="/docs",
               description="TCP congestion control (CUBIC / BBR / Reno) over an emulated WAN: the emulator, flows, tests. UI: [/](/)")
@@ -168,7 +168,7 @@ def get_wan(): return wan()
 
 class Wan(BaseModel):
     rtt_ms: float | None = Field(None, description="round-trip time added by the emulator, ms (split evenly between the directions); 0..300")
-    rate_mbit: float | None = Field(None, description="bottleneck rate, Mbit/s; 1..1000")
+    rate_mbit: float | None = Field(None, description="bottleneck rate, Mbit/s; 1..5000")
     loss_pct: float | None = Field(None, description="random loss per direction, %; 0..20")
     buffer_bdp: float | None = Field(None, description="bottleneck buffer in multiples of the BDP (rate x RTT); 0.05..16")
     reset: bool = Field(False, description="back to the lab defaults (lab.conf): 30 ms, 100 Mbit/s, 0 %, 1 x BDP")

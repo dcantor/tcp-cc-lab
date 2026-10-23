@@ -2,6 +2,18 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.6.0] - 2026-10-23
+
+### Changed
+- The bottleneck rate goes up to 5 Gbit/s (it was 1 Gbit/s) and is now a slider: 18 stops, 10 Mbit/s to 5 Gbit/s,
+  applied on release. The sender bit-rate slider also goes to 5 Gbit/s (then unlimited). Buffer and queue sizes are
+  shown in MB once they pass 1 MB.
+- wanem caps the bottleneck buffer at 128 MB (the VM has 512 MB; 16 x BDP at 5 Gbit/s and 300 ms would be 3 GB).
+
+### Measured
+- At 5 Gbit/s and 10 ms RTT the VMs, not the shaper, are the limit (tbf dropped nothing): one flow 1.5–2.3 Gbit/s
+  and three at once 2.5 Gbit/s at host MTU 1500; 3.9–4.1 Gbit/s and 3.5 Gbit/s at MTU 9000.
+
 ## [0.5.1] - 2026-10-23
 
 ### Changed
