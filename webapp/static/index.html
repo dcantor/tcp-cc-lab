@@ -95,6 +95,9 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
         <label>Bottleneck buffer</label>
         <div class="row"><span class="seg" id="bufSeg"><button data-b="0.25">¼ BDP</button><button data-b="1" class="on">1 BDP</button><button data-b="4">4 BDP</button><button data-b="16">16 BDP</button></span><span class="mute small" id="bufBytes"></span></div>
         <div></div>
+        <label>Host MTU</label>
+        <div class="row"><span class="seg" id="mtuSeg"><button data-m="1500">1500</button><button data-m="9000">9000 (jumbo)</button></span><span class="small" id="infraMtu"></span></div>
+        <div class="small" id="mtuMsg"></div>
       </div>
       <datalist id="rttTicks"><option value="0"></option><option value="30"></option><option value="100"></option><option value="200"></option><option value="300"></option></datalist>
       <div class="row" style="margin-top:10px">
@@ -108,7 +111,7 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
         <div class="kpi"><b>Bottleneck drops (A → B)</b><span id="kDrop">–</span></div>
         <div class="kpi"><b>B → A (acks, or B senders)</b><span id="kThrB">–</span></div>
       </div>
-      <p class="mute small" style="margin:10px 0 0">Changes apply when you let go of the slider, in place (<code>tc qdisc change</code>): a running flow sees the new RTT on its next packets and keeps going. The VMs add about 1 ms of their own on top of the emulated RTT.</p>
+      <p class="mute small" style="margin:10px 0 0">The MTU switch sets all six hosts' eth1 (between runs: a flow keeps the MSS it started with); r1, r2 and wanem's links are always 9000. Changes apply when you let go of the slider, in place (<code>tc qdisc change</code>): a running flow sees the new RTT on its next packets and keeps going. The VMs add about 1 ms of their own on top of the emulated RTT.</p>
     </section>
 
     <section class="card">
@@ -238,7 +241,7 @@ function flowTable(r) {
     <td class="num">${f.mbps}</td><td class="num">${r.mode === 'compete' ? Math.round(100 * f.mbps / tot) + ' %' : '–'}</td><td class="num">${f.retransmits}</td>
     <td class="num">${f.rtt_ms.min}</td><td class="num">${f.rtt_ms.mean}</td><td class="num">${f.rtt_ms.max}</td><td class="bad small">${esc(f.error || '')}</td></tr>`).join('');
   const w = r.wan;
-  return `<div class="small mute">${r.mode === 'compete' ? 'All at once' : 'One at a time'}, ${r.duration} s${r.mode === 'compete' ? ' each' : ' per algorithm'}, site ${r.direction === 'a2b' ? 'A → B' : 'B → A'}; WAN at the start: RTT ${w.rtt_ms} ms, ${w.rate_mbit} Mbit/s, loss ${w.loss_pct} %, buffer ${w.buffer_bdp} × BDP</div>
+  return `<div class="small mute">${r.mode === 'compete' ? 'All at once' : 'One at a time'}, ${r.duration} s${r.mode === 'compete' ? ' each' : ' per algorithm'}, site ${r.direction === 'a2b' ? 'A → B' : 'B → A'}; WAN at the start: RTT ${w.rtt_ms} ms, ${w.rate_mbit} Mbit/s, loss ${w.loss_pct} %, buffer ${w.buffer_bdp} × BDP${r.host_mtu ? `; host MTU ${r.host_mtu}` : ''}${r.flows[0]?.mss ? ` (MSS ${r.flows[0].mss})` : ''}</div>
     <div class="scroll"><table><tr><th>Algorithm</th><th>Sender</th><th class="num">Mbit/s</th><th class="num">Share</th><th class="num">Retransmits</th><th class="num">RTT min</th><th class="num">mean</th><th class="num">max (ms)</th><th></th></tr>${rows}</table></div>
     ${r.mode === 'compete' ? `<div class="small" style="margin-top:6px">Total <b>${r.total_mbps}</b> Mbit/s · Jain fairness <b>${r.jain_fairness}</b> (1 = equal shares, ${(1 / r.flows.length).toFixed(2)} = one flow takes all) · bottleneck drops <b>${r.bottleneck.drops}</b></div>` : ''}`;
 }
@@ -268,6 +271,19 @@ $('#resetBtn').onclick = () => applyWan({reset: true});
 $('#pingBtn').onclick = async () => { $('#pingOut').textContent = 'pinging…';
   try { const r = await post('/api/rtt', {}); $('#pingOut').textContent = `a-cubic → b-cubic: min ${r.min_ms} / avg ${r.avg_ms} / max ${r.max_ms} ms`; }
   catch (e) { $('#pingOut').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } };
+
+function showMtu(m) {
+  if (!m || m.error) { $('#infraMtu').innerHTML = m ? `<span class="bad">${esc(m.error)}</span>` : ''; return; }
+  document.querySelectorAll('#mtuSeg button').forEach(b => b.classList.toggle('on', +b.dataset.m === m.host_mtu));
+  const bad = Object.entries(m.infra).flatMap(([n, d]) => Object.entries(d).filter(([, v]) => v !== m.infra_mtu).map(([k, v]) => `${n} ${k} ${v ?? '?'}`));
+  $('#infraMtu').innerHTML = (m.host_mtu ? '' : `<span class="bad">hosts mixed: ${esc(Object.entries(m.hosts).map(([h, v]) => h + ' ' + v).join(', '))}</span> · `) +
+    (bad.length ? `<span class="bad">r1 / r2 / wanem not ${m.infra_mtu}: ${esc(bad.join(', '))}</span>` : `<span class="mute">r1, r2, wanem links: ${m.infra_mtu} <span class="okc">✓</span></span>`);
+}
+document.querySelectorAll('#mtuSeg button').forEach(b => b.onclick = async () => {
+  $('#mtuMsg').textContent = 'setting…';
+  try { const m = await post('/api/mtu', {mtu: +b.dataset.m}); showMtu(m); $('#mtuMsg').innerHTML = `<span class="okc">hosts at ${m.host_mtu}</span>`; if (STATE) { STATE.mtu = m; hostsTable(STATE.nodes); } }
+  catch (e) { $('#mtuMsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+});
 
 async function pollWan() {
   try {
@@ -306,9 +322,10 @@ function topo(ns) {
 }
 
 function hostsTable(ns) {
-  const by = Object.fromEntries((ns || []).map(n => [n.node, n]));
-  $('#hosts').innerHTML = `<tr><th>Node</th><th>Role</th><th>Data IP</th><th>CC</th><th>State</th></tr>` + (ns || []).map(n =>
-    `<tr><td class="mono">${n.cc ? `<span class="sw" style="background:${color(n.cc)}"></span>` : ''}${esc(n.node)}</td><td>${esc(n.role)}</td><td class="mono">${esc(n.data)}</td><td>${n.cc ? LABEL[n.cc] : '–'}</td>
+  const m = (STATE && STATE.mtu && !STATE.mtu.error) ? STATE.mtu : null;
+  const mtuOf = n => !m ? '–' : n.role === 'host' ? (m.hosts[n.node] ?? '?') : m.infra[n.node] ? [...new Set(Object.values(m.infra[n.node]))].join('/') : '–';
+  $('#hosts').innerHTML = `<tr><th>Node</th><th>Role</th><th>Data IP</th><th>CC</th><th class="num">MTU</th><th>State</th></tr>` + (ns || []).map(n =>
+    `<tr><td class="mono" style="white-space:nowrap">${n.cc ? `<span class="sw" style="background:${color(n.cc)}"></span>` : ''}${esc(n.node)}</td><td>${esc(n.role)}</td><td class="mono">${esc(n.data)}</td><td>${n.cc ? LABEL[n.cc] : '–'}</td><td class="num">${mtuOf(n)}</td>
      <td><span class="pill ${n.state === 'running' ? 'ok' : 'bad'}">${esc(n.state)}</span></td></tr>`).join('');
 }
 
@@ -332,7 +349,7 @@ async function refresh() {
     $('#upPill').className = 'pill ' + (STATE.all_up ? 'ok' : 'bad');
     $('#busyPill').style.display = STATE.busy ? '' : 'none';
     ['goBtn', 'verifyBtn', 'testBtn'].forEach(b => $('#' + b).disabled = !STATE.all_up);
-    topo(STATE.nodes); hostsTable(STATE.nodes); testsCard(STATE.tests);
+    topo(STATE.nodes); hostsTable(STATE.nodes); testsCard(STATE.tests); showMtu(STATE.mtu);
     if (!RUN && STATE.active) openRun(STATE.active);
     else if (!RUN && !chartData) { const f = STATE.flows.compete || STATE.flows.solo; if (f) openRun(f.id); }
     runsTable();

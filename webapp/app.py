@@ -73,7 +73,7 @@ def wan(fresh=False):
         _wan.update(t=time.time(), v={"at": time.time(), **v}); return _wan["v"]
 
 
-HOST_CMD = "sysctl -n net.ipv4.tcp_congestion_control; tc qdisc show dev eth1 | awk 'NR==1{print $2}'; pgrep -x iperf3 >/dev/null && echo up || echo down"
+HOST_CMD = "sysctl -n net.ipv4.tcp_congestion_control; tc qdisc show dev eth1 | awk 'NR==1{print $2}'; pgrep -x iperf3 >/dev/null && echo up || echo down; cat /sys/class/net/eth1/mtu"
 _hosts = {"t": 0, "v": None}
 
 
@@ -85,11 +85,23 @@ def hosts_health():
     def one(h):
         try:
             rc, out = C.run(h["name"], HOST_CMD, timeout=10); l = out.split()
-            return {"node": h["name"], "expected": h["cc"], "up": rc == 0 and len(l) == 3, "cc": l[0] if l else None,
-                    "qdisc": l[1] if len(l) > 1 else None, "iperf3": len(l) > 2 and l[2] == "up"}
-        except Exception: return {"node": h["name"], "expected": h["cc"], "up": False, "cc": None, "qdisc": None, "iperf3": False}   # noqa: BLE001
+            return {"node": h["name"], "expected": h["cc"], "up": rc == 0 and len(l) == 4, "cc": l[0] if l else None,
+                    "qdisc": l[1] if len(l) > 1 else None, "iperf3": len(l) > 2 and l[2] == "up", "mtu": int(l[3]) if len(l) > 3 and l[3].isdigit() else None}
+        except Exception: return {"node": h["name"], "expected": h["cc"], "up": False, "cc": None, "qdisc": None, "iperf3": False, "mtu": None}   # noqa: BLE001
     with ThreadPoolExecutor(6) as ex: v = list(ex.map(one, hs))
     _hosts.update(t=time.time(), v=v); return v
+
+
+_mtu = {"t": 0, "v": None}
+
+
+def mtu(fresh=False):
+    """The hosts' MTU and r1 / r2 / wanem's links (tools/cclab.py mtu_state), cached for 20 s."""
+    if fresh or not _mtu["v"] or time.time() - _mtu["t"] > 20:
+        try: v = C.mtu_state()
+        except Exception as e: v = {"error": str(e)[:200]}   # noqa: BLE001
+        _mtu.update(t=time.time(), v=v)
+    return _mtu["v"]
 
 
 def live_flows():
@@ -141,7 +153,7 @@ def lab():
 @app.get("/api/state", tags=["lab"], summary="Nodes, the WAN emulator, the last tests, the last compete / solo result, the run going")
 def state():
     ns = nodes(); up = any(n["state"] == "running" for n in ns); a = active_run()
-    return {"at": time.time(), "nodes": ns, "up": up, "all_up": up and all_running(ns), "wan": wan() if up else None, "tests": tests_summary(),
+    return {"at": time.time(), "nodes": ns, "up": up, "all_up": up and all_running(ns), "wan": wan() if up else None, "mtu": mtu() if up else None, "tests": tests_summary(),
             "flows": latest_flows(), "busy": registry.busy(), "active": a.id if a else None, "active_mode": a.mode if a else None}
 
 
@@ -166,6 +178,24 @@ def set_wan(w: Wan):
     except Exception as e: raise HTTPException(502, str(e)[:300])   # noqa: BLE001
     _wan["t"] = 0
     if a and a.mode in FLOW_MODES: a.say("MARK " + json.dumps({"ts": round(time.time(), 2), **{k: v["settings"][k] for k in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}}))
+    return v
+
+
+@app.get("/api/mtu", tags=["mtu"], summary="The hosts' MTU (1500 or 9000, all six together) and r1 / r2 / wanem's links (always 9000)")
+def get_mtu(): return mtu(fresh=True)
+
+
+class Mtu(BaseModel):
+    mtu: int = Field(..., description="the hosts' eth1 MTU: 1500 or 9000 (the routers' and wanem's links stay 9000)")
+
+
+@app.post("/api/mtu", tags=["mtu"], summary="Set the hosts' MTU (all six); not while a run goes (a flow keeps the MSS it started with)")
+def set_mtu(m: Mtu):
+    if m.mtu not in C.HOST_MTUS: raise HTTPException(422, f"mtu: one of {', '.join(map(str, C.HOST_MTUS))}")
+    if registry.busy(): raise HTTPException(409, "a run is going: change the MTU between runs (a TCP flow keeps the MSS it started with)")
+    try: v = C.mtu_set(m.mtu)
+    except Exception as e: raise HTTPException(502, str(e)[:300])   # noqa: BLE001
+    _mtu.update(t=time.time(), v=v); _hosts["t"] = 0
     return v
 
 
@@ -281,6 +311,14 @@ def metrics():
         out.append(line("tcpcc_wanem_up", lab, int(bool(w) and "error" not in w)))
         hh = hosts_health()
         gauge("tcpcc_host_up", "1 if the host answers over SSH"); gauge("tcpcc_host_cc_ok", "1 if the host runs the algorithm its name says")
+        gauge("tcpcc_host_mtu", "the host's eth1 MTU (1500 or 9000)")
+        for h in hh:
+            if h["mtu"]: out.append(line("tcpcc_host_mtu", {**lab, "node": h["node"]}, h["mtu"]))
+        mt = mtu()
+        if "error" not in mt:
+            gauge("tcpcc_link_mtu", "MTU of r1 / r2 / wanem's data links (must always be 9000)")
+            for node, devs in mt["infra"].items():
+                for dev, v in devs.items(): out.append(line("tcpcc_link_mtu", {**lab, "node": node, "dev": dev}, v or 0))
         gauge("tcpcc_host_fq", "1 if the host's data NIC has the fq qdisc (pacing)"); gauge("tcpcc_host_iperf3_up", "1 if the host's iperf3 server is running")
         for h in hh:
             hl = {**lab, "node": h["node"], "expected": h["expected"], "cc": h["cc"] or ""}

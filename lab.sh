@@ -23,10 +23,19 @@ user_of() { [[ "${ROLE[$1]}" == router ]] && echo vyos || echo lab; }
 PUBKEY="$(cat "${TCPCC_LAB_PUBKEY:-$HOME/.ssh/id_ed25519.pub}" 2>/dev/null || true)"
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5)
 S() { local n="$1"; shift; ssh "${SSH_OPTS[@]}" "$(user_of "$n")@${MGMT_IP[$n]}" "$@"; }   # run a command on a node (key auth)
+any_running() { local n; for n in "${ALL_NODES[@]}"; do running "$n" && return 0; done; return 1; }
 ssh_ready() { timeout 8 bash -c "exec 3<>/dev/tcp/${MGMT_IP[$1]}/22" 2>/dev/null; }
 
-ensure_networks() {   # the OOB network and the four data segments (networks/*.xml)
-  local n; for n in "${NETS[@]}"; do
+ensure_networks() {   # the OOB network and the four data segments (networks/*.xml); a data segment defined before the jumbo
+  # MTU (0.3.0) is redefined, which needs the lab's VMs off (their tap devices take the bridge's MTU when they start)
+  local n; for n in "${DATA_NETS[@]}"; do
+    V net-info "$n" &>/dev/null || continue
+    V net-dumpxml "$n" | grep -q "<mtu size='$INFRA_MTU'/>" && continue
+    any_running && die "network $n is not MTU $INFRA_MTU yet: stop the lab (lab.sh down) and run lab.sh up again"
+    echo "[$n] redefining with MTU $INFRA_MTU"
+    V net-destroy "$n" &>/dev/null || true; V net-undefine "$n" >/dev/null
+  done
+  for n in "${NETS[@]}"; do
     V net-info "$n" &>/dev/null || { V net-define "$LAB_DIR/networks/$n.xml" >/dev/null; V net-autostart "$n" >/dev/null; }
     [[ "$(V net-info "$n" | awk '/Active/{print $2}')" == "yes" ]] || V net-start "$n" >/dev/null
   done
@@ -70,7 +79,7 @@ X
     <interface type='network'>
       <mac address='$(mac "$n" "$i")'/>
       <source network='$net'/>
-      <model type='virtio'/>
+      <model type='virtio'/>$([[ "$i" != 0 ]] && printf "\n      <mtu size='%s'/>" "$INFRA_MTU")
       <address type='pci' domain='0x0000' bus='0x00' slot='$(printf '0x%02x' $((3 + i)))' function='0x0'/>
     </interface>
 X
@@ -104,8 +113,10 @@ set interfaces ethernet eth0 description 'OOB management'
 set protocols static route 10.0.0.0/8 next-hop $OOB_GATEWAY
 set interfaces ethernet eth1 address ${WAN_IP[$n]}/$WAN_PREFIX_LEN
 set interfaces ethernet eth1 description 'WAN to $o via wanem'
+set interfaces ethernet eth1 mtu $INFRA_MTU
 set interfaces ethernet eth2 address ${DATA_IP[$n]}/${LAN_PREFIX[$s]#*/}
 set interfaces ethernet eth2 description 'LAN site $s'
+set interfaces ethernet eth2 mtu $INFRA_MTU
 set protocols static route ${LAN_PREFIX[${SITE[$o]}]} next-hop ${WAN_IP[$o]}
 C
 }
@@ -161,6 +172,8 @@ write_files:
   - path: /etc/hosts
     content: |
 $(etc_hosts "$n" | sed 's/^/      /')
+  - path: /etc/tcpcc-mtu
+    content: "$HOST_MTU\n"
   - path: /etc/modules-load.d/tcpcc.conf
     content: "tcp_bbr\nsch_fq\n"
   - path: /etc/sysctl.d/90-tcpcc.conf
@@ -171,9 +184,10 @@ $(for kv in "${HOST_SYSCTL[@]}"; do echo "      ${kv%%=*} = ${kv#*=}"; done)
     permissions: "0755"
     content: |
       #!/bin/sh
-      # tcp-cc-lab host: the algorithm and buffers (sysctl), fq on the data NIC, the iperf3 server
+      # tcp-cc-lab host: the algorithm and buffers (sysctl), the MTU (lab.sh mtu), fq on the data NIC, the iperf3 server
       modprobe tcp_bbr; modprobe sch_fq
       sysctl -q -p /etc/sysctl.d/90-tcpcc.conf
+      ip link set eth1 mtu "\$(cat /etc/tcpcc-mtu 2>/dev/null || echo $HOST_MTU)"
       tc qdisc replace dev eth1 root fq
       pgrep -x iperf3 >/dev/null || iperf3 -s -D -p 5201 --logfile /var/log/iperf3.log
   - path: /etc/motd
@@ -217,8 +231,8 @@ $(etc_hosts "$n" | sed 's/^/      /')
       # wanem: bridge eth1 (r1) and eth2 (r2), then the default impairment
       modprobe sch_netem; modprobe sch_tbf; modprobe bridge
       ip link show br0 >/dev/null 2>&1 || ip link add br0 type bridge stp_state 0 forward_delay 0
-      for d in eth1 eth2; do ip link set "\$d" master br0; ip link set "\$d" up; done
-      ip link set br0 up
+      for d in eth1 eth2; do ip link set "\$d" mtu $INFRA_MTU; ip link set "\$d" master br0; ip link set "\$d" up; done
+      ip link set br0 mtu $INFRA_MTU up
       /usr/local/bin/wanem reset >/var/log/wanem.log 2>&1
   - path: /etc/motd
     content: "wanem: WAN emulator. br0 = eth1 (r1) + eth2 (r2); each egress: netem delay RTT/2 (+ loss) -> tbf bottleneck. doas wanem show | stats | apply RTT_MS RATE_MBIT LOSS_PCT BUFFER_BDP | reset\n"
@@ -304,7 +318,7 @@ cmd_configure() {   # re-render and re-apply the routers' config over SSH (confi
   local n; for n in $(routers_of $(nodes_or_all "$@")); do
     vyos_config "$n" > "$(node_dir "$n")/vyos_config.txt"
     { echo "source /opt/vyatta/etc/functions/script-template"; echo configure; grep -v '^#' "$(node_dir "$n")/vyos_config.txt"; echo commit; echo save; echo exit; } \
-      | S "$n" 'cat > /tmp/day0.sh; sg vyattacfg -c "/bin/vbash /tmp/day0.sh"' 2>&1 | grep -vE '^$|Saving configuration|Done' | sed "s/^/[$n] /" || true
+      | S "$n" 'cat > /tmp/day0.sh; sg vyattacfg -c "/bin/vbash /tmp/day0.sh"' 2>&1 | grep -vE '^$|Saving configuration|Done|WARNING: (Default password|User "vyos")|not be too short' | sed "s/^/[$n] /" || true
     echo "[$n] applied"
   done
 }
@@ -373,11 +387,25 @@ cmd_inventory() {
   } | python3 -m json.tool
 }
 
+cmd_mtu() {   # show | set 1500|9000 — the hosts' eth1 MTU (all six); the routers' and wanem's links stay at INFRA_MTU
+  local sub="${1:-show}" m h n; shift || true
+  case "$sub" in
+    show)
+      for n in "${ALL_NODES[@]}"; do
+        printf '%-8s %s\n' "$n" "$(S "$n" 'for d in eth1 eth2 br0; do [ -e /sys/class/net/$d ] && printf "%s %s  " $d $(cat /sys/class/net/$d/mtu); done; true' 2>/dev/null || echo unreachable)"
+      done ;;
+    set)
+      m="${1:?usage: lab.sh mtu set ${HOST_MTUS[*]}}"; [[ " ${HOST_MTUS[*]} " == *" $m "* ]] || die "MTU must be one of: ${HOST_MTUS[*]}"
+      for h in "${HOSTS[@]}"; do ( S "$h" "doas sh -c 'echo $m > /etc/tcpcc-mtu && ip link set eth1 mtu $m && ip route flush cache' && echo \"$h eth1 mtu \$(cat /sys/class/net/eth1/mtu)\"" 2>&1 || echo "$h FAILED" ) & done; wait ;;
+    *) die "usage: lab.sh mtu show | set ${HOST_MTUS[*]}" ;;
+  esac
+}
+
 cmd_wan() { S "$WANEM" doas wanem "$@"; }   # show | stats | apply RTT_MS RATE_MBIT LOSS_PCT BUFFER_BDP | reset | offloads
 
 cmd_cc() {   # each host's algorithm, qdisc and iperf3 server
   local h; for h in "${HOSTS[@]}"; do
-    S "$h" 'printf "%-8s cc %-6s (available: %s)  qdisc eth1: %s  iperf3: %s\n" "$(hostname)" "$(sysctl -n net.ipv4.tcp_congestion_control)" "$(sysctl -n net.ipv4.tcp_available_congestion_control)" "$(tc qdisc show dev eth1 | awk "NR==1{print \$2}")" "$(pgrep -x iperf3 >/dev/null && echo up || echo DOWN)"' 2>/dev/null || echo "$h unreachable"
+    S "$h" 'printf "%-8s cc %-6s (available: %s)  mtu %s  qdisc eth1: %s  iperf3: %s\n" "$(hostname)" "$(sysctl -n net.ipv4.tcp_congestion_control)" "$(sysctl -n net.ipv4.tcp_available_congestion_control)" "$(cat /sys/class/net/eth1/mtu)" "$(tc qdisc show dev eth1 | awk "NR==1{print \$2}")" "$(pgrep -x iperf3 >/dev/null && echo up || echo DOWN)"' 2>/dev/null || echo "$h unreachable"
   done
 }
 
@@ -385,13 +413,18 @@ cmd_verify() {   # quick end-to-end look: algorithms, the WAN settings, routing,
   echo "== hosts"; cmd_cc
   echo; echo "== wanem"; { cmd_wan show | head -8; } || true
   echo; echo "== routers"; local r; for r in "${ROUTERS[@]}"; do S "$r" "ip -br addr show | grep -E '^eth[12]'; ip route show | grep -E '192.168.14[12]'" 2>&1 | sed "s/^/  [$r] /"; done
-  echo; echo "== across the WAN: every site A host to every site B host (ping, 5 x 0.2 s)"
-  local a b out ok=0 tot=0
+  echo; echo "== infrastructure MTU (must be $INFRA_MTU)"
+  local bad=0 r d v
+  for r in r1 r2 wanem; do for d in eth1 eth2 $([[ $r == wanem ]] && echo br0); do
+    v="$(S "$r" "cat /sys/class/net/$d/mtu" 2>/dev/null)"; [[ "$v" == "$INFRA_MTU" ]] || { bad=1; echo "  $r $d mtu ${v:-?} (NOT $INFRA_MTU)"; }
+  done; done; [[ $bad -eq 0 ]] && echo "  r1, r2, wanem: every data link $INFRA_MTU"
+  echo; echo "== across the WAN: every site A host to every site B host (ping, 5 x 0.2 s; one unfragmentable at the hosts' MTU)"
+  local a b out ok=0 tot=0 hm big; hm="$(S "${HOSTS_A[0]}" 'cat /sys/class/net/eth1/mtu')"; big=$((hm - 28))
   for a in "${HOSTS_A[@]}"; do for b in "${HOSTS_B[@]}"; do tot=$((tot + 1))
-    out="$(S "$a" "ping -c5 -i0.2 -W2 -q ${DATA_IP[$b]}" 2>&1 | awk -F/ '/min\/avg/{print $4}')"
+    out="$(S "$a" "ping -c1 -W2 -M do -s $big -q ${DATA_IP[$b]} >/dev/null && ping -c5 -i0.2 -W2 -q ${DATA_IP[$b]}" 2>&1 | awk -F'= ' '/min\/avg/{split($2, v, "/"); print v[2]}')"
     if [[ -n "$out" ]]; then ok=$((ok + 1)); printf '  %-8s -> %-8s rtt avg %s ms\n' "$a" "$b" "$out"; else printf '  %-8s -> %-8s FAIL\n' "$a" "$b"; fi
-  done; done; echo "  $ok/$tot pairs ok"
-  [[ $ok -eq $tot ]]
+  done; done; echo "  $ok/$tot pairs ok (hosts' MTU $hm: $big-byte pings, DF set)"
+  [[ $ok -eq $tot && $bad -eq 0 ]]
 }
 
 cmd_flows() { python3 "$LAB_DIR/tools/cclab.py" "$@"; }   # tools/cclab.py: compete | solo | rtt | wan (JSON on stdout)
@@ -424,6 +457,7 @@ usage: $(basename "$0") <command> [node...]
   wait [node..]        until SSH answers (and cloud-init is done)
   down [node..]        shut the VMs down
   status | inventory   nodes, addresses, algorithms | the lab as JSON
+  mtu show | set ${HOST_MTUS[*]// /|}   the hosts' MTU (all six; r1 / r2 / wanem links always $INFRA_MTU)
   wan show|stats|apply RTT_MS RATE_MBIT LOSS_PCT BUFFER_BDP|reset   the WAN emulator (defaults: $WAN_RTT_MS ms RTT, $WAN_RATE_MBIT Mbit/s)
   cc                   each host's congestion control, qdisc, iperf3 server
   flows <sub> [opts]   compete | solo | rtt | wan  (tools/cclab.py --help)
@@ -442,6 +476,6 @@ U
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
-  image|up|down|wait|resumed|bootstrap|configure|status|inventory|wan|cc|flows|verify|exec|test|webapp|ssh|console|log|rebuild|clean) "cmd_$cmd" "$@" ;;
+  image|up|down|wait|resumed|bootstrap|configure|status|inventory|mtu|wan|cc|flows|verify|exec|test|webapp|ssh|console|log|rebuild|clean) "cmd_$cmd" "$@" ;;
   *) usage; exit 1 ;;
 esac

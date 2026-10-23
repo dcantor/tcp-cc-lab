@@ -17,12 +17,13 @@ offloads() {   # the qdiscs must see wire-size packets: no GRO / LRO (virtio gue
 apply() {
   rtt="$1"; rate="$2"; loss="$3"; buf="$4"
   # one-way delay in µs; netem queue limit = packets in flight on the delay line at the bottleneck rate, x2, + 1000;
-  # tbf burst >= rate / HZ (250 or 1000) and >= 2 MTU; tbf limit = BUFFER x BDP bytes, at least 20 packets
+  # tbf burst >= rate / HZ (250 or 1000) and >= 2 jumbo frames (the links are MTU 9000: a frame bigger than the burst is
+  # dropped by tbf); tbf limit = BUFFER x BDP bytes, at least 4 jumbo frames
   eval "$(awk -v r="$rtt" -v m="$rate" -v b="$buf" 'BEGIN {
     ow = r * 500; bps = m * 1e6; bdp = bps / 8 * r / 1000;
     lim = int(bps / 12000 * ow / 1e6 * 2) + 1000;
-    burst = int(bps / 8 / 250); if (burst < 3028) burst = 3028;
-    q = int(b * bdp); if (q < 30280) q = 30280;
+    burst = int(bps / 8 / 250); if (burst < 18028) burst = 18028;
+    q = int(b * bdp); if (q < 36056) q = 36056;
     printf "OW=%d NLIM=%d BURST=%d QLIM=%d BDP=%d\n", ow, lim, burst, q, bdp }')"
   lossarg=""; [ "$(awk -v l="$loss" 'BEGIN{print (l > 0)}')" = 1 ] && lossarg="loss random ${loss}%"
   for d in $DEVS; do

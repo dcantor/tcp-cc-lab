@@ -7,6 +7,7 @@ congestion control algorithm (CUBIC / BBR / Reno), and the WAN emulator's settin
     cclab.py solo    [--duration 20] [--direction a2b|b2a] [--algos ...]   one algorithm at a time, the link to itself
     cclab.py rtt     [--count 10]      ping RTT a-cubic -> b-cubic (the emulated RTT + the VMs' own ~1 ms)
     cclab.py wan     [--rtt MS] [--rate MBIT] [--loss PCT] [--buffer BDP] [--reset]   show / change the WAN emulator
+    cclab.py mtu     [--set 1500|9000]   the hosts' MTU (all six), and r1 / r2 / wanem's links (always 9000)
 
 A flow run prints one line per flow per second on stderr while it runs,
     SAMPLE {"t": 3, "ts": 1792720728.4, "cc": "bbr", "host": "a-bbr", "mbps": 41.2, "rtt_ms": 33.1, "cwnd": 412000, "retr": 0}
@@ -86,6 +87,41 @@ def wan_reset():
     return wan_stats()
 
 
+# ---- MTU -------------------------------------------------------------------------------------------------------------
+HOST_MTUS = (1500, 9000)
+INFRA_MTU = 9000
+INFRA_LINKS = {"r1": ("eth1", "eth2"), "r2": ("eth1", "eth2"), "wanem": ("eth1", "eth2", "br0")}
+
+
+def _parallel(fn, items):
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max(1, len(items))) as ex: return dict(zip(items, ex.map(fn, items)))
+
+
+def mtu_state():
+    """{"hosts": {host: mtu}, "infra": {node: {dev: mtu}}, "host_mtu": the common value or None if mixed, "infra_ok": bool}."""
+    hosts = [n["name"] for n in inventory()["nodes"] if n["role"] == "host"]
+    def host(h):
+        rc, out = run(h, "cat /sys/class/net/eth1/mtu", timeout=10); return int(out) if rc == 0 and out.strip().isdigit() else None
+    def infra(n):
+        rc, out = run(n, " ; ".join(f"cat /sys/class/net/{d}/mtu" for d in INFRA_LINKS[n]), timeout=10)
+        vals = [int(x) if x.isdigit() else None for x in out.split()]
+        return dict(zip(INFRA_LINKS[n], vals + [None] * (len(INFRA_LINKS[n]) - len(vals))))
+    hs = _parallel(host, hosts); inf = _parallel(infra, list(INFRA_LINKS))
+    vals = set(hs.values())
+    return {"hosts": hs, "host_mtu": vals.pop() if len(vals) == 1 else None, "choices": list(HOST_MTUS),
+            "infra": inf, "infra_mtu": INFRA_MTU, "infra_ok": all(v == INFRA_MTU for d in inf.values() for v in d.values())}
+
+
+def mtu_set(mtu):
+    mtu = int(mtu)
+    if mtu not in HOST_MTUS: raise ValueError(f"MTU must be one of {HOST_MTUS}")
+    r = subprocess.run([str(LAB / "lab.sh"), "mtu", "set", str(mtu)], capture_output=True, text=True, timeout=60)
+    st = mtu_state()
+    if r.returncode or st["host_mtu"] != mtu: raise RuntimeError(f"not every host took MTU {mtu}: {st['hosts']} {r.stdout[-200:]}")
+    return st
+
+
 # ---- measurements ----------------------------------------------------------------------------------------------------
 def ping_rtt(src="a-cubic", dst="b-cubic", count=10):
     rc, out = run(src, f"ping -c {count} -i 0.2 -W 2 -q {node(dst)['ip']}", timeout=count + 15)
@@ -108,7 +144,7 @@ class Flow(threading.Thread):
     def __init__(self, sender, duration, t0, delay=0.0):
         super().__init__(daemon=True)
         self.h, self.duration, self.t0, self.delay = sender, duration, t0, delay
-        self.samples, self.end, self.error, self.actual_cc = [], None, None, None
+        self.samples, self.end, self.error, self.actual_cc, self.mss = [], None, None, None, None
 
     def run(self):
         time.sleep(self.delay)
@@ -122,6 +158,7 @@ class Flow(threading.Thread):
                 kind, data = ev.get("event"), ev.get("data") or {}
                 if kind == "start":
                     self.actual_cc = (data.get("test_start") or {}).get("congestion") or data.get("sender_tcp_congestion")
+                    self.mss = data.get("tcp_mss_default")
                 elif kind == "interval":
                     st = (data.get("streams") or [{}])[0]; su = data.get("sum") or {}
                     now = time.time(); s = {"t": round(now - self.t0), "ts": round(now, 2), "cc": self.h["cc"], "host": self.h["name"],
@@ -141,7 +178,7 @@ class Flow(threading.Thread):
         st = ((e.get("streams") or [{}])[0].get("sender") or {})
         rtts = [s["rtt_ms"] for s in self.samples if s["rtt_ms"]]
         return {"host": self.h["name"], "cc": self.h["cc"], "cc_reported": (e.get("sender_tcp_congestion") or self.actual_cc),
-                "mbps": round(rcv.get("bits_per_second", 0) / 1e6, 2), "sent_mbps": round(snt.get("bits_per_second", 0) / 1e6, 2),
+                "mss": self.mss, "mbps": round(rcv.get("bits_per_second", 0) / 1e6, 2), "sent_mbps": round(snt.get("bits_per_second", 0) / 1e6, 2),
                 "retransmits": snt.get("retransmits", 0), "rtt_ms": {"mean": round(st.get("mean_rtt", 0) / 1000, 2), "min": round(st.get("min_rtt", 0) / 1000, 2),
                 "max": round(st.get("max_rtt", 0) / 1000, 2), "p50_samples": sorted(rtts)[len(rtts) // 2] if rtts else None},
                 "error": self.error}
@@ -153,10 +190,10 @@ def jain(xs):
 
 
 def flows(mode, duration, direction, algos, stagger=0.0):
-    wan = wan_stats(); hs = senders(direction, algos)
+    wan = wan_stats(); hs = senders(direction, algos); mtu = mtu_state()
     if not hs: raise SystemExit("no senders for those algorithms")
     log(f"{mode}: {', '.join(h['name'] + ' -> ' + h['peer'] for h in hs)}; WAN RTT {wan['settings']['rtt_ms']} ms, "
-        f"{wan['settings']['rate_mbit']} Mbit/s, loss {wan['settings']['loss_pct']} %, buffer {wan['settings']['buffer_bdp']} x BDP; {duration} s each")
+        f"{wan['settings']['rate_mbit']} Mbit/s, loss {wan['settings']['loss_pct']} %, buffer {wan['settings']['buffer_bdp']} x BDP; host MTU {mtu['host_mtu'] or 'mixed'}; {duration} s each")
     before = wan_stats()[direction]; results = []
     t0 = time.time()
     if mode == "compete":
@@ -169,13 +206,13 @@ def flows(mode, duration, direction, algos, stagger=0.0):
             log(f"--- {h['cc']} alone ({h['name']})"); f = Flow(h, duration, t0); f.start(); f.join(duration + 60); results.append(f.summary()); time.sleep(2)
     after = wan_stats()
     bott = {k: after[direction][k] - before[k] for k in ("bytes", "packets", "drops")}
-    out = {"mode": mode, "direction": direction, "duration": duration, "stagger": stagger, "wan": wan["settings"], "flows": results,
+    out = {"mode": mode, "direction": direction, "duration": duration, "stagger": stagger, "wan": wan["settings"], "host_mtu": mtu["host_mtu"], "flows": results,
            "total_mbps": round(sum(r["mbps"] for r in results), 2) if mode == "compete" else None,
            "jain_fairness": jain([r["mbps"] for r in results]) if mode == "compete" else None,
            "bottleneck": {**bott, "wan_after": after["settings"]},
            "samples": [s for f in (fs if mode == "compete" else []) for s in f.samples] if mode == "compete" else None}
     for r in results:
-        log(f"{r['cc']:>6} {r['host']:<8} {r['mbps']:>7} Mbit/s  retr {r['retransmits']:>5}  rtt mean {r['rtt_ms']['mean']} ms" + (f"  ERROR {r['error']}" if r["error"] else ""))
+        log(f"{r['cc']:>6} {r['host']:<8} {r['mbps']:>7} Mbit/s  retr {r['retransmits']:>5}  rtt mean {r['rtt_ms']['mean']} ms  mss {r['mss']}" + (f"  ERROR {r['error']}" if r["error"] else ""))
     if mode == "compete": log(f" total {out['total_mbps']} Mbit/s, Jain fairness {out['jain_fairness']}, bottleneck drops {bott['drops']}")
     return out
 
@@ -189,6 +226,7 @@ def main():
     p = sp.add_parser("rtt"); p.add_argument("--count", type=int, default=10); p.add_argument("--src", default="a-cubic"); p.add_argument("--dst", default="b-cubic")
     p = sp.add_parser("wan"); p.add_argument("--rtt", type=float); p.add_argument("--rate", type=float); p.add_argument("--loss", type=float)
     p.add_argument("--buffer", type=float); p.add_argument("--reset", action="store_true")
+    p = sp.add_parser("mtu"); p.add_argument("--set", type=int, choices=HOST_MTUS)
     a = ap.parse_args()
     if a.cmd in ("compete", "solo"):
         algos = [x.strip() for x in a.algos.split(",") if x.strip()]
@@ -198,6 +236,7 @@ def main():
         res = flows(a.cmd, a.duration, a.direction, algos, a.stagger)
         res.pop("samples", None) if a.cmd == "solo" else None
     elif a.cmd == "rtt": res = ping_rtt(a.src, a.dst, a.count)
+    elif a.cmd == "mtu": res = mtu_set(a.set) if a.set else mtu_state()
     elif a.reset: res = wan_reset()
     elif any(v is not None for v in (a.rtt, a.rate, a.loss, a.buffer)): res = wan_apply(a.rtt, a.rate, a.loss, a.buffer)
     else: res = wan_stats()

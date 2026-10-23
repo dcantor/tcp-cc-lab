@@ -7,6 +7,7 @@ Lab Setup
     ${hosts}=    Node Names    host
     Set Global Variable    @{HOSTS}    @{hosts}
     Wan Reset
+    Mtu Set    1500
 
 Should Be Within
     [Arguments]    ${value}    ${low}    ${high}    ${what}

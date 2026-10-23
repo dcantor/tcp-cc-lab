@@ -2,6 +2,29 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.3.0] - 2026-10-22
+
+### Added
+- MTU: r1, r2 and wanem's data links are always 9000 (VyOS `mtu 9000` on eth1 / eth2; wanem eth1, eth2 and br0; the
+  four libvirt data bridges and every data NIC's `<mtu size='9000'/>`). The hosts switch between 1500 and 9000, all six
+  together: `lab.sh mtu show | set 1500|9000`, `cclab.py mtu`, the portal's "Host MTU" switch (`GET/POST /api/mtu`, not
+  while a run goes), kept in /etc/tcpcc-mtu across reboots; the default is 1500. Flow results record the host MTU and
+  each flow's MSS (1448 / 8948); the hosts table shows every node's MTU; `verify` checks the infrastructure MTU and
+  sends an unfragmentable ping at the hosts' MTU between every pair.
+- Metrics `tcpcc_host_mtu`, `tcpcc_link_mtu` (lab-portal 0.51.0: alerts `TcpCcInfraMtuNot9000`, `TcpCcHostMtuMixed`).
+- Robot suite 04_mtu (5 tests): jumbo infrastructure and bridges, 1500 (1472 DF ok, 1473 refused, MSS 1448, ~1500-byte
+  frames through the bottleneck), 9000 (8972 DF across the WAN, MSS 8948, ~9000-byte frames at the rate), all three
+  algorithms at 9000, the MTU surviving a reboot. 19 tests in all.
+
+### Changed
+- Host image: iputils ping (busybox's cannot set Don't Fragment). Rebuilding the image needs the Alpine VMs' disks
+  removed first (`lab.sh clean <nodes>`): they are overlays on it.
+- wanem: tbf burst at least 2 jumbo frames (18028 B; a frame bigger than the burst is dropped) and its queue at least 4.
+- `ensure_networks` redefines a data bridge without MTU 9000 (with the lab off).
+
+### Fixed
+- `tools/build_image.sh` reported success when it could not replace the old image (owned by libvirt).
+
 ## [0.2.1] - 2026-10-22
 
 ### Added

@@ -1,4 +1,5 @@
 <network>
   <name>tcpcc-lan-a</name>
   <bridge name='virbr-tcclana' stp='off' delay='0'/>
+  <mtu size='9000'/>
 </network>

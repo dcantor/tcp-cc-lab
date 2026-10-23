@@ -15,7 +15,7 @@ TCP congestion control across an emulated WAN: CUBIC, BBR and Reno side by side,
 | a-cubic / a-bbr / a-reno | Alpine hosts in site A, one algorithm each, iperf3 server | .31–.33 |
 | b-cubic / b-bbr / b-reno | the same in site B (each host's peer is the same algorithm on the other side) | .41–.43 |
 
-Libvirt/KVM (QEMU) like the other labs; ~3.8 GiB RAM. Domains `tcpcc-<node>`, consoles 127.0.0.1:5601–5609, MACs
+Libvirt/KVM (QEMU) like the other labs. MTU: hosts 1500 or 9000 (switchable), routers and wanem 9000 (always); ~3.8 GiB RAM. Domains `tcpcc-<node>`, consoles 127.0.0.1:5601–5609, MACs
 `52:54:00:ce:*`. Users: routers vyos / vyos, hosts and wanem lab / lab; your SSH key is installed on all of them.
 
 ## Quick start
@@ -31,6 +31,14 @@ Libvirt/KVM (QEMU) like the other labs; ~3.8 GiB RAM. Domains `tcpcc-<node>`, co
 
 Portal: http://192.168.50.231:8112 (user unit `tcp-cc-lab-webapp`, Lab Hub sign-in). The RTT slider (0–300 ms,
 default 30) applies when released, with `tc qdisc change`, so a running flow keeps going and the chart marks the change.
+
+## MTU
+
+r1, r2 and wanem's data links are jumbo (9000), always, as are the four libvirt bridges under them. The hosts' eth1 is
+1500 by default and switches to 9000 and back (all six together) with `./lab.sh mtu set 9000` or the portal's Host MTU
+switch; the value is kept in `/etc/tcpcc-mtu` on each host and survives reboots. At 9000 TCP negotiates an MSS of 8948
+and the bottleneck forwards ~9000-byte frames (tbf's burst is sized for two of them). Change it between runs: a flow
+keeps the MSS it started with. OOB management stays at 1500.
 
 ## The WAN emulator
 

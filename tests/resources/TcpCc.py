@@ -62,3 +62,21 @@ def flow_with_rtt_change(cc="cubic", duration=20, at=6, new_rtt=120):
     t0 = time.time(); f = C.Flow(h, int(duration), t0); f.start()
     time.sleep(float(at)); C.wan_apply(rtt_ms=float(new_rtt)); f.join(int(duration) + 60)
     return {"summary": f.summary(), "samples": f.samples, "changed_at": float(at)}
+
+
+def mtu_state(): return C.mtu_state()
+
+
+def mtu_set(mtu): return C.mtu_set(int(mtu))
+
+
+def bridge_mtu(bridge):
+    """MTU of a libvirt bridge on this host (the data segments must be 9000)."""
+    return int(Path(f"/sys/class/net/{bridge}/mtu").read_text())
+
+
+def bottleneck_bytes_per_packet(mode="solo", duration=8, algos="cubic"):
+    """Run flows and return (summary, average bytes per packet through the a2b bottleneck while they ran)."""
+    before = C.wan_stats()["a2b"]; r = run_flows(mode, duration, "a2b", algos); after = C.wan_stats()["a2b"]
+    pk = after["packets"] - before["packets"]
+    return r, round((after["bytes"] - before["bytes"]) / pk) if pk else 0
