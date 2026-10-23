@@ -2,6 +2,22 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.9.0] - 2026-10-23
+
+### Changed
+- The PDF flow report is styled as a white paper, matching the walkthrough. It is US Letter, with a running header
+  (title, run id) and footer (lab version, author, "Page n of N"). Headings and the cover are in Noto Serif.
+  - **Cover:** the kicker, a serif title per mode, an italic summary of the setup, headline throughput, an abstract,
+    and an author and date block with the run and software versions.
+  - **Contents and executive summary**, with key findings worked out from the data: the leader and its ratios, sharing
+    (compete), queueing delay above the path RTT, retransmits, throughput before and after each change, and system
+    load.
+  - **Numbered chapters:** 1 Test environment, 2 Methodology, 3 Results, 4 System load, 5 Conclusions (with caveats on
+    reading a single run), then appendices A (device configurations) and B (run log).
+  - **Numbered figures and tables**, with captions.
+  - **New table:** mean throughput and RTT in each phase of the run, between one change and the next.
+  - The appendix flows rather than starting each device on a new page, so the report is shorter.
+
 ## [0.8.1] - 2026-10-23
 
 ### Changed

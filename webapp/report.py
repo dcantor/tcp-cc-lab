@@ -109,36 +109,59 @@ def mark_labels(marks, start):
 
 
 CSS = """
-@page { size: A4; margin: 14mm 13mm 16mm; }
+@page { size: Letter; margin: 18mm 17mm 20mm;
+  @top-left { content: "TCP congestion control · flow test"; font: 7.8pt "Noto Sans", sans-serif; color: #6b7280; }
+  @top-right { content: "%(runid)s"; font: 7.8pt "DejaVu Sans Mono", monospace; color: #6b7280; }
+  @bottom-left { content: "tcp-cc-lab %(version)s · %(author)s"; font: 7.8pt "Noto Sans", sans-serif; color: #6b7280; }
+  @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7.8pt "Noto Sans", sans-serif; color: #6b7280; } }
+@page :first { @top-left { content: none; } @top-right { content: none; } @bottom-left { content: none; } @bottom-right { content: none; } }
+:root { --ink: #1f2937; --head: #0f172a; --mute: #6b7280; --line: #e5e7eb; --accent: #1d4ed8; --code: #f3f4f6; }
 * { box-sizing: border-box; }
-body { font: 10.5pt/1.45 "Noto Sans", "DejaVu Sans", system-ui, sans-serif; color: #1f2937; margin: 0; }
-h1 { font-size: 20pt; margin: 0 0 2px; } h2 { font-size: 13pt; margin: 18px 0 6px; border-bottom: 1px solid #e5e7eb; padding-bottom: 3px; break-after: avoid; }
-h3 { font-size: 10.5pt; margin: 10px 0 2px; break-after: avoid; }
-.sub { color: #52514e; } .mono { font-family: "DejaVu Sans Mono", ui-monospace, monospace; font-size: 9pt; }
-table { border-collapse: collapse; width: 100%; font-size: 9.5pt; margin: 4px 0; break-inside: avoid; }
-th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #e5e7eb; vertical-align: top; } th { color: #52514e; font-weight: 600; }
+body { font: 10.3pt/1.55 "Noto Sans", "DejaVu Sans", system-ui, sans-serif; color: var(--ink); margin: 0; }
+h1, h2, h3, .serif { font-family: "Noto Serif", "Liberation Serif", Georgia, serif; color: var(--head); }
+h2 { font-size: 16pt; font-weight: 700; margin: 0 0 8pt; padding-bottom: 4pt; border-bottom: 2px solid var(--accent); break-after: avoid; }
+h2 .n { color: var(--accent); margin-right: 8pt; }
+h3 { font-size: 12pt; margin: 14pt 0 4pt; break-after: avoid; }
+h4 { font: 600 9.4pt "Noto Sans", sans-serif; margin: 8pt 0 2pt; color: #334155; break-after: avoid; }
+p { margin: 5pt 0; text-align: justify; hyphens: auto; } ul, ol { margin: 4pt 0 6pt; padding-left: 18pt; } li { margin: 2.5pt 0; }
+.mono, code { font-family: "DejaVu Sans Mono", ui-monospace, monospace; font-size: 8.5pt; } code { background: var(--code); padding: 0 3px; border-radius: 3px; }
+.sub { color: var(--mute); font-weight: 400; font-family: "Noto Sans", sans-serif; font-size: 9pt; } .note { color: var(--mute); font-size: 8.8pt; } .bad { color: #b91c1c; }
+section.chapter { break-before: page; } .page { break-before: page; }
+table { border-collapse: collapse; width: 100%; font-size: 9pt; margin: 4pt 0 2pt; break-inside: avoid; }
+th, td { text-align: left; padding: 3.5pt 6pt; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: #f8fafc; color: #334155; font-weight: 600; } thead th, tr:first-child th { border-top: 1.5px solid #cbd5e1; border-bottom: 1.5px solid #cbd5e1; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.kpis { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; } .kpi { border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 10px; flex: 1; min-width: 120px; }
-.kpi b { display: block; font-size: 8.5pt; color: #52514e; font-weight: 500; } .kpi span { font-size: 14pt; font-weight: 600; }
-.fig { break-inside: avoid; margin: 6px 0 10px; } .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 9pt; margin: 2px 0; }
-.legend svg { vertical-align: 0; margin-right: 4px; } .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
-.note { color: #52514e; font-size: 9pt; } .bad { color: #b91c1c; }
-header { border-bottom: 2px solid #1f2937; padding-bottom: 8px; margin-bottom: 6px; }
-h2 { counter-increment: none; } h2.page, .page { break-before: page; }
-p { margin: 5px 0; } ul { margin: 4px 0; padding-left: 20px; } li { margin: 2px 0; }
-/* the title page */
-.cover { height: 265mm; display: flex; flex-direction: column; break-after: page; }
-.cover .band { background: #1f2937; color: #fff; margin: 0 -13mm; padding: 16mm 13mm 10mm; }
-.cover .kicker { font-size: 10pt; letter-spacing: .12em; text-transform: uppercase; color: #cbd5e1; }
-.cover h1 { font-size: 26pt; line-height: 1.15; margin: 8px 0 6px; color: #fff; } .cover .lede { font-size: 11.5pt; color: #e5e7eb; margin: 0; }
-.cover .topo { margin: 10mm 0 4mm; } .cover .meta { margin-top: auto; width: 100%; } .cover .meta th { width: 28%; }
-.cover .contents { columns: 2; font-size: 10pt; margin: 6px 0 0; padding-left: 18px; }
+table.kv th { width: 24%; background: none; border-top: 0; border-bottom: 1px solid var(--line); }
+.cap { font-size: 8.6pt; color: #475569; margin: 3pt 0 12pt; } .cap b { color: var(--head); }
+.fig { break-inside: avoid; margin: 8pt 0 4pt; } .tbl { break-inside: avoid; margin: 8pt 0 4pt; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 8.6pt; margin: 2px 0; } .legend svg { vertical-align: 0; margin-right: 4px; }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+.kpis { display: flex; gap: 0; margin: 8pt 0; border-top: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; }
+.kpi { flex: 1; padding: 6pt 10pt; border-left: 1px solid var(--line); } .kpi:first-child { border-left: 0; padding-left: 0; }
+.kpi b { display: block; font-size: 8pt; color: var(--mute); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.kpi span { font: 700 17pt "Noto Serif", serif; color: var(--head); }
+.box { border: 1px solid var(--line); border-left: 4px solid var(--accent); background: #f8fafc; padding: 8pt 12pt; border-radius: 3px; margin: 8pt 0; break-inside: avoid; }
+.box .h { font-weight: 700; font-size: 8.4pt; letter-spacing: .14em; text-transform: uppercase; color: var(--head); margin-bottom: 3pt; }
+.box ul { margin: 2pt 0 0; } .box p { margin: 2pt 0; }
+/* the cover, as the walkthrough white paper */
+.cover { height: 236mm; display: flex; flex-direction: column; justify-content: space-between; break-after: page; }
+.cover .top { border-top: 5pt solid var(--head); padding-top: 8pt; display: flex; justify-content: space-between; align-items: baseline; }
+.cover .kicker { color: var(--accent); font-weight: 700; letter-spacing: .18em; text-transform: uppercase; font-size: 10pt; }
+.cover .series { color: var(--mute); font-size: 9pt; letter-spacing: .04em; }
+.cover h1 { font-size: 30pt; line-height: 1.15; font-weight: 700; letter-spacing: -.01em; margin: 0 0 10pt; }
+.cover .lede { font-family: "Noto Serif", serif; font-style: italic; font-size: 12.5pt; line-height: 1.45; color: #334155; margin: 0 0 16pt; text-align: left; }
+.cover .abstract { border-top: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; padding: 9pt 0; }
+.cover .abstract .h { font-weight: 700; font-size: 8.5pt; letter-spacing: .14em; text-transform: uppercase; color: var(--head); margin-bottom: 3pt; }
+.cover .abstract p { font-size: 9.6pt; color: #334155; margin: 0; }
+.cover .bottom { border-top: 1.5pt solid var(--head); padding-top: 10pt; display: flex; justify-content: space-between; align-items: flex-end; gap: 12mm; }
+.cover .author .name { font: 700 15pt "Noto Serif", serif; color: var(--head); } .cover .author .date { font-size: 10.5pt; color: #334155; margin-top: 2pt; }
+.cover .meta { color: var(--mute); font-size: 8.3pt; line-height: 1.6; text-align: right; }
+.toc { columns: 2; column-gap: 14mm; font-size: 10pt; margin: 4pt 0 14pt; } .toc div { margin: 2pt 0; break-inside: avoid; } .toc .n { color: var(--accent); font-weight: 700; display: inline-block; width: 22pt; }
 /* appendix */
-pre.cfg { font: 7.6pt/1.35 "DejaVu Sans Mono", ui-monospace, monospace; background: #f6f7f9; border: 1px solid #e5e7eb; border-radius: 4px; padding: 6px 8px;
-  white-space: pre-wrap; word-break: break-all; margin: 2px 0 8px; }
+h3.node { border-top: 1.5px solid #cbd5e1; padding-top: 6pt; margin-top: 16pt; }
+pre.cfg { font: 7pt/1.28 "DejaVu Sans Mono", ui-monospace, monospace; background: #f8fafc; border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px;
+  white-space: pre-wrap; word-break: break-all; margin: 2px 0 8px; text-align: left; }
 pre.cfg.two { columns: 2; column-gap: 14px; }
-h4 { font-size: 9.5pt; margin: 8px 0 2px; color: #374151; break-after: avoid; }
-.callout { border-left: 3px solid #2a78d6; background: #f3f7fd; padding: 6px 10px; margin: 8px 0; break-inside: avoid; }
 """
 
 
@@ -287,7 +310,7 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     else:
         summary = (f"The flows ran together for {res.get('seconds', 0):g} s, starting with {wtxt} and "
                    + (f"a sender bit rate of {br:g} Mbit/s per flow. " if br else "no sender bit-rate limit. ")
-                   + (f"{len(mk)} change{'s were' if len(mk) != 1 else ' was'} made while they ran (section 3). " if mk else "Nothing was changed while they ran. ")
+                   + (f"{len(mk)} change{'s were' if len(mk) != 1 else ' was'} made while they ran (section 2). " if mk else "Nothing was changed while they ran. ")
                    + "Averaged over the run (time-weighted across the flows' segments): " + ", ".join(f"{ln(a)} {fmt(v)} Mbit/s" for a, v in rank) + ".")
     if run.get("error"): summary += f" The run ended with an error: {run['error']}."
 
@@ -343,12 +366,12 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     app_a = ""
     if cfg:
         app_a = (f"<h2 class='page'>Appendix A. Device configurations</h2><p class='note'>Collected from each device over SSH when this report was made ({time.strftime('%Y-%m-%d %H:%M')}), after the run. "
-                 "The WAN emulator therefore shows its settings at that moment; the settings during the run are in section 3. VyOS password hashes are redacted.</p>")
+                 "The WAN emulator therefore shows its settings at that moment; the settings during the run are in section 2. VyOS password hashes are redacted.</p>")
         for k, n in enumerate([n for name in NODE_ORDER for n in (inv or {}).get("nodes", []) if n["name"] == name]):
             secs = cfg.get(n["name"], [])
             if n["role"] == "host" and n["name"] != "a-cubic" and ref and not diffs:   # verified identical: print the list once (A.1)
                 secs = [(t, f"Identical to a-cubic (A.1) apart from net.ipv4.tcp_congestion_control = {n['cc']}: checked over all {len(ref)} settings.") if t.startswith("TCP and socket") else (t, txt) for t, txt in secs]
-            app_a += (f"<h3 class='{'page' if k else ''}'>A.{k + 1} {E(n['name'])} <span class='sub'>— {E({'host': 'host, ' + ln(n['cc']), 'router': 'router (VyOS)', 'wanem': 'WAN emulator'}[n['role']])}, management {E(n['mgmt_ip'])}</span></h3>" +
+            app_a += (f"<h3 class='node'>A.{k + 1} {E(n['name'])} <span class='sub'>— {E({'host': 'host, ' + ln(n['cc']), 'router': 'router (VyOS)', 'wanem': 'WAN emulator'}[n['role']])}, management {E(n['mgmt_ip'])}</span></h3>" +
                       "".join(f"<h4>{E(t)}</h4><pre class='cfg{' two' if t.startswith('TCP and socket') else ''}'>{E(txt) or '(no output)'}</pre>" for t, txt in secs))
     events = [l for l in log if not l["line"].startswith(("SAMPLE ", "WAN "))]
     mk_iter = iter(labels)
@@ -359,26 +382,117 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     app_b = ("<h2 class='page'>Appendix B. Run log</h2><p class='note'>The run's own log, without the per-second samples; times from the start of the run.</p><pre class='cfg'>" +
              E("\n".join(f"{l['t'] - started:7.1f}s  {logline(l['line'], mk_iter)}" for l in events)) + "</pre>")
 
-    toc = ["1. Summary", "2. The lab", "3. How this run was tested", "4. Results", "5. Nodes during the run"] + (["Appendix A. Device configurations"] if cfg else []) + ["Appendix B. Run log"]
-    title = {"compete": "Compete test", "solo": "Solo test", "live": "Live test"}[mode]
-    cover = f"""<section class='cover'><div class='band'><div class='kicker'>tcp-cc-lab · flow test report</div>
-<h1>{title}: {' vs '.join(ln(a) for a in algos)} across an emulated WAN</h1>
-<p class='lede'>{E(wtxt[0].upper() + wtxt[1:])}{'' if not br else f'; sender bit rate {br:g} Mbit/s per flow'}.</p></div>
+    # ---- phases between the changes, findings, conclusions
+    bounds = [0.0] + [x for x, _ in mk] + [xmax]
+    phase_names = ["start"] + [lb for _, lb in mk]
+    phases = []
+    for k in range(len(bounds) - 1):
+        a0, a1 = bounds[k], bounds[k + 1]
+        row = {}
+        for a in algos:
+            v = [s_["mbps"] for s_ in per[a] if a0 < s_["ts"] - t0 <= a1]
+            r = [s_["rtt_ms"] for s_ in per[a] if a0 < s_["ts"] - t0 <= a1 and s_["rtt_ms"]]
+            row[a] = (sum(v) / len(v) if v else None, sum(r) / len(r) if r else None)
+        phases.append((a0, a1, phase_names[k], row))
+    ph_tbl = ""
+    if len(phases) > 1:
+        ph_tbl = ("<table><tr><th>Phase</th><th class='num'>From – to</th>" + "".join(f"<th class='num'><span class='sw' style='background:{COL[a]}'></span>{LABEL[a]} Mbit/s</th>" for a in algos) +
+                  "".join(f"<th class='num'>{LABEL[a]} RTT</th>" for a in algos) + "</tr>" +
+                  "".join(f"<tr><td>{E('as started' if nm == 'start' else 'after ' + nm)}</td><td class='num'>{a0:.0f}–{a1:.0f} s</td>" +
+                          "".join(f"<td class='num'>{fmt(row[a][0])}</td>" for a in algos) + "".join(f"<td class='num'>{fmt(row[a][1])} ms</td>" for a in algos) + "</tr>"
+                          for a0, a1, nm, row in phases) + "</table>")
+    rtt_cfg = wan0.get("rtt_ms") or 0
+    mean_rtt = {a: (sum(x["rtt_ms"] for x in per[a] if x["rtt_ms"]) / max(1, len([x for x in per[a] if x["rtt_ms"]]))) for a in algos}
+    retr_tot = {a: sum(x.get("retr") or 0 for x in per[a]) for a in algos}
+    find = []
+    if len(rank) > 1 and rank[1][1] > 0:
+        find.append(f"<b>{ln(rank[0][0])} carried the most</b>: {fmt(rank[0][1])} Mbit/s, {rank[0][1] / rank[1][1]:.1f}× {ln(rank[1][0])} ({fmt(rank[1][1])})" +
+                    (f" and {rank[0][1] / max(rank[-1][1], 1e-9):.1f}× {ln(rank[-1][0])} ({fmt(rank[-1][1])})." if len(rank) > 2 else "."))
+    elif rank: find.append(f"<b>{ln(rank[0][0])}</b> carried {fmt(rank[0][1])} Mbit/s.")
+    if mode == "compete": find.append(f"<b>Sharing:</b> Jain's fairness index {res.get('jain_fairness')} (1 = equal shares); the flows together used {100 * (res.get('total_mbps') or 0) / (wan0.get('rate_mbit') or 1):.0f} % of the bottleneck.")
+    if rtt_cfg and any(mean_rtt.values()):
+        hi = max(mean_rtt.items(), key=lambda x: x[1])
+        find.append(f"<b>Queueing delay:</b> against a {rtt_cfg:g} ms path, the mean RTT the senders saw was " + ", ".join(f"{ln(a)} {fmt(v)} ms" for a, v in mean_rtt.items()) +
+                    f"; the most, {fmt(hi[1] - rtt_cfg)} ms above the path, is time spent in the bottleneck queue.")
+    if any(retr_tot.values()):
+        hr = max(retr_tot.items(), key=lambda x: x[1])
+        find.append(f"<b>Retransmits:</b> {ln(hr[0])} retransmitted the most ({hr[1]:,} segments over the run" + ", against " + ", ".join(f"{ln(a)} {v:,}" for a, v in retr_tot.items() if a != hr[0]) + ").")
+    for a0, a1, nm, row in phases[1:3]:
+        prev = phases[[p_[0] for p_ in phases].index(a0) - 1][3]
+        ch = ", ".join(f"{ln(a)} {fmt(prev[a][0])} → {fmt(row[a][0])}" for a in algos if prev[a][0] is not None and row[a][0] is not None)
+        if ch: find.append(f"<b>After {E(nm)}</b> (at {a0:.0f} s), mean Mbit/s: {ch}.")
+    busy = None
+    if nodes:
+        busy = max(((n, max(x[1] for x in win[n])) for n in nodes), key=lambda x: x[1])
+        memx = max(((n, max(x[2] / x[3] for x in win[n] if x[3])) for n in nodes), key=lambda x: x[1])
+        find.append(f"<b>System load:</b> the busiest node was {busy[0]}, at {fmt(busy[1])} % CPU at its peak; the fullest memory was {memx[0]}'s, at {100 * memx[1]:.0f} % of its RAM.")
+    findings = "<ul>" + "".join(f"<li>{f_}</li>" for f_ in find) + "</ul>"
+
+    # ---- figure / table numbering
+    fig_n, tbl_n = [0], [0]
+    def figure(svg, title, text):
+        fig_n[0] += 1
+        return f"<div class='fig'>{svg}<div class='cap'><b>Figure {fig_n[0]}.</b> {title}. {text}</div></div>"
+    def table(html_, title, text=""):
+        tbl_n[0] += 1
+        return f"<div class='tbl'>{html_}<div class='cap'><b>Table {tbl_n[0]}.</b> {title}.{(' ' + text) if text else ''}</div></div>"
+
+    title = {"compete": "Three Algorithms, One Bottleneck", "solo": "Each Algorithm Alone", "live": "Congestion Control Under Changing Conditions"}[mode]
+    kicker = {"compete": "Flow test · compete", "solo": "Flow test · solo", "live": "Flow test · live"}[mode]
+    lede = (f"{' vs '.join(ln(a) for a in algos)} across an emulated WAN: {wtxt}" + (f", sender bit rate {br:g} Mbit/s per flow" if br else "") + ".")
+    cover = f"""<section class='cover'>
+<div class='top'><div class='kicker'>{kicker}</div><div class='series'>Network lab series · tcp-cc-lab</div></div>
+<div><h1>{title}</h1><p class='lede'>{E(lede)}</p>
 <div class='kpis'>{kpis}</div>
-<div class='topo'>{topo_svg(inv, wan0)}</div>
-<table class='meta'><tr><th>Prepared by</th><td>{E(author)}</td></tr><tr><th>Date</th><td>{time.strftime('%B %-d, %Y', time.localtime(started))}</td></tr>
-<tr><th>Run</th><td class='mono'>{E(run['id'])} · {E(run['status'])} · {time.strftime('%H:%M:%S', time.localtime(started))}–{time.strftime('%H:%M:%S', time.localtime(finished))} ({finished - started:.0f} s)</td></tr>
-<tr><th>Lab</th><td>tcp-cc-lab {E(lab_version)}</td></tr><tr><th>Contents</th><td><ol class='contents' style='list-style:none;padding:0'>{''.join(f'<li>{E(t)}</li>' for t in toc)}</ol></td></tr></table></section>"""
+<div class='abstract'><div class='h'>Abstract</div><p>{E(summary)}</p></div></div>
+<div class='bottom'><div class='author'><div class='name'>{E(author)}</div><div class='date'>{time.strftime('%B %-d, %Y', time.localtime(started))}</div></div>
+<div class='meta'>Run <span class='mono'>{E(run['id'])}</span> · {E(run['status'])} · {time.strftime('%H:%M:%S', time.localtime(started))}–{time.strftime('%H:%M:%S', time.localtime(finished))} ({finished - started:.0f} s)<br>
+libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Linux'}) · {E(iperf[0].split(' (')[0]) if iperf else 'iperf3'}<br>tcp-cc-lab {E(lab_version)} · github.com/dcantor/tcp-cc-lab</div></div></section>"""
+
+    chapters = [("1", "Test environment"), ("2", "Methodology"), ("3", "Results"), ("4", "System load"), ("5", "Conclusions")] + \
+               ([("A", "Appendix: device configurations")] if cfg else []) + [("B", "Appendix: run log")]
+    toc = "<div class='toc'>" + "".join(f"<div><span class='n'>{n_}</span>{E(t)}</div>" for n_, t in chapters) + "</div>"
+    h2 = lambda n_, t, first=False: f"<h2><span class='n'>{n_}</span>{E(t)}</h2>"   # noqa: E731
+
+    # chapter 1: the environment (from lab_html, with numbered figure and tables)
+    env = lab_html.replace("<h2>2. The lab</h2>", "")
+    env = env.replace(f"<div class='fig'>{topo_svg(inv, wan0)}</div>", figure(topo_svg(inv, wan0), "The lab", f"Three hosts per site, one per algorithm, joined through r1, wanem and r2. wanem shows the WAN as the run started."))
+    env = re.sub(r"(<table><tr><th>Node</th>.*?</table>)", lambda m_: table(m_.group(1), "The nodes", "vCPU and RAM as each node reports them."), env, count=1, flags=re.S)
+    env = re.sub(r"(<table><tr><th>Setting</th>.*?</table>)", lambda m_: table(m_.group(1), "The hosts' key TCP settings", "Values from a-cubic."), env, count=1, flags=re.S)
+    # chapter 2: methodology
+    meth = method_html.replace("<h2 class='page'>3. How this run was tested</h2>", "")
+    meth = re.sub(r"<h3>Run parameters</h3><table>(.*?)</table>", lambda m_: "<h3>Run parameters</h3>" + table(f"<table class='kv'>{m_.group(1)}</table>", "Run parameters"), meth, count=1, flags=re.S)
+    meth = re.sub(r"<h3>Changes during the run</h3>(<table>.*?</table>)", lambda m_: "<h3>Changes during the run</h3>" + table(m_.group(1), "Changes made while the flows ran", "Times from the start of the run."), meth, count=1, flags=re.S)
+    # chapter 3: results
+    res_main = re.sub(r"^(<table>.*?</table>)", lambda m_: table(m_.group(1), "Results per flow"), res_tbl, count=1, flags=re.S)
+    res_html = res_main + (table(ph_tbl, "Mean throughput and RTT in each phase", "A phase runs from one change to the next; means of the per-second samples.") if ph_tbl else "")
+    res_html += "<h3>Per second</h3>" + legend(algos) + "".join(figure(c, t, s_[0].upper() + s_[1:]) for t, s_, c in figs)
+    # chapter 4: system load
+    load = nodes_html.replace("<div class='fig'><h2>Nodes during the run</h2>", "<div>").replace("<h2>Nodes during the run</h2>", "")
+    load = re.sub(r"(<table><tr><th>Node</th><th class='num'>CPU mean</th>.*?</table>)", lambda m_: table(m_.group(1), "CPU and memory per node during the run"), load, count=1, flags=re.S)
+    load = re.sub(r"<div class='fig'><h3>CPU <span class='sub'>% of vCPUs</span></h3>(.*?)</div>(?=<div class='fig'><h3>Memory)",
+                  lambda m_: figure(m_.group(1), "CPU per node", "% of the node's vCPUs; solid lines site A and r1, dashed site B and r2"), load, count=1, flags=re.S)
+    load = re.sub(r"<div class='fig'><h3>Memory in use <span class='sub'>MB · dashed: RAM</span></h3>(.*)</div>$",
+                  lambda m_: figure(m_.group(1), "Memory in use per node", "MB (MemTotal − MemAvailable); the dashed line is the RAM"), load, count=1, flags=re.S)
+    # chapter 5: conclusions
+    concl = ("<p>" + E(summary) + "</p>" + findings +
+             "<div class='box'><div class='h'>Reading these results</div><ul>"
+             "<li>This is one run. Differences of a few per cent between runs are normal; large differences (several times) are not noise.</li>"
+             "<li>Emulated loss is random and independent. Real loss is often bursty, or caused by congestion elsewhere.</li>"
+             "<li>Linux 6.12 ships BBR v1, which does not back off on isolated losses. BBRv3 would behave differently in lossy phases.</li>"
+             "<li>The VMs forward about 2–2.5 Gbit/s at MTU 1500 and 3.5–4 Gbit/s at 9000. Above that, the path, not the bottleneck, sets the limit.</li></ul></div>")
     body = f"""{cover}
-<h2>1. Summary</h2><div class='kpis'>{kpis}</div><div class='callout'>{E(summary)}</div>
-{lab_html}
-{method_html}
-<h2 class='page'>4. Results</h2>{res_tbl}
-{''.join(f"<div class='fig'>{'<h3>Per second</h3>' + legend(algos) if i == 0 else ''}<h3>{t} <span class='sub'>{s}</span></h3>{c}</div>" for i, (t, s, c) in enumerate(figs))}
-{nodes_html.replace('<h2>Nodes during the run</h2>', "<h2 class='page'>5. Nodes during the run</h2>")}
-{app_a}
-{app_b}"""
-    return f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>Flow test report {E(run['id'])}</title><style>{CSS}</style></head><body>{body}</body></html>"
+<h2>Contents</h2>{toc}
+<h2>Executive summary</h2><div class='kpis'>{kpis}</div><p>{E(summary)}</p><div class='box'><div class='h'>Key findings</div>{findings}</div>
+<section class='chapter'>{h2('1', 'Test environment')}{env}</section>
+<section class='chapter'>{h2('2', 'Methodology')}{meth}</section>
+<section class='chapter'>{h2('3', 'Results')}{res_html}</section>
+<section class='chapter'>{h2('4', 'System load')}<p>Each node's own /proc/stat and /proc/meminfo, sampled once a second over one SSH session per node. CPU is a percentage of the node's vCPUs.</p>{load}</section>
+<section class='chapter'>{h2('5', 'Conclusions')}{concl}</section>
+{app_a.replace("<h2 class='page'>Appendix A. Device configurations</h2>", "<section class='chapter'>" + h2('A', 'Appendix: device configurations')) + '</section>' if app_a else ''}
+<section class='chapter'>{h2('B', 'Appendix: run log')}{app_b.replace("<h2 class='page'>Appendix B. Run log</h2>", "")}</section>"""
+    css = CSS.replace("%(runid)s", run["id"]).replace("%(version)s", lab_version).replace("%(author)s", author)
+    return f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{E(title)} · flow test {E(run['id'])}</title><style>{css}</style></head><body>{body}</body></html>"
 
 
 def build_pdf(html, out_pdf):
