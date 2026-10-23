@@ -67,6 +67,8 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
 .charts h3 { font-size:13px; margin:0 0 2px; font-weight:600; } .charts h3 span { font-weight:400; color:var(--mute); }
 .sw { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
 .scroll { overflow-x:auto; }
+.pos { display:grid; grid-template-columns: minmax(0, 1fr) auto auto; gap:8px; align-items:center; margin:0 0 4px 40px; }
+.pos input[type=range] { height:22px; } .pos span { color:var(--mute); white-space:nowrap; min-width:88px; text-align:right; } .pos button { padding:2px 8px; }
 </style>
 </head>
 <body>
@@ -135,16 +137,13 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
         <label for="win">Window</label>
         <input type="range" id="win" min="5" max="305" step="5" value="60" aria-describedby="winVal">
         <div class="big" id="winVal">60 <small>s</small></div>
-        <label for="pos">Position <span class="small">(slide back for history)</span></label>
-        <input type="range" id="pos" min="0" max="60" step="1" value="60" aria-describedby="posVal">
-        <div class="row"><span class="big" id="posVal">live</span><button id="followBtn" style="display:none" title="jump back to the newest second and keep following">Follow live</button></div>
       </div>
       <div class="small" id="liveNow" style="margin:0 0 6px"></div>
       <div class="charts">
-        <div><h3>Throughput <span>Mbit/s, per second (sender) · dashed: bottleneck rate</span></h3><div class="chart" id="cThr"></div></div>
-        <div><h3>RTT the sender sees <span>ms (smoothed RTT, TCP_INFO)</span></h3><div class="chart" id="cRtt"></div></div>
-        <div><h3>Retransmits <span>segments per second</span></h3><div class="chart" id="cRetr"></div></div>
-        <div id="qWrap"><h3>Bottleneck queue <span>ms of queue at the tbf (live test)</span></h3><div class="chart" id="cQ"></div></div>
+        <div><h3>Throughput <span>Mbit/s, per second (sender) · dashed: bottleneck rate</span></h3><div class="chart" id="cThr"></div><div class="pos" data-c="cThr"><input type="range" min="0" max="60" step="5" value="60" aria-label="throughput chart: time position (slide left for history)"><span class="mono small"></span><button class="small" title="jump to the newest second and keep following">Live</button></div></div>
+        <div><h3>RTT the sender sees <span>ms (smoothed RTT, TCP_INFO)</span></h3><div class="chart" id="cRtt"></div><div class="pos" data-c="cRtt"><input type="range" min="0" max="60" step="5" value="60" aria-label="RTT chart: time position (slide left for history)"><span class="mono small"></span><button class="small" title="jump to the newest second and keep following">Live</button></div></div>
+        <div><h3>Retransmits <span>segments per second</span></h3><div class="chart" id="cRetr"></div><div class="pos" data-c="cRetr"><input type="range" min="0" max="60" step="5" value="60" aria-label="retransmits chart: time position (slide left for history)"><span class="mono small"></span><button class="small" title="jump to the newest second and keep following">Live</button></div></div>
+        <div id="qWrap"><h3>Bottleneck queue <span>ms of queue at the tbf (live test)</span></h3><div class="chart" id="cQ"></div><div class="pos" data-c="cQ"><input type="range" min="0" max="60" step="5" value="60" aria-label="queue chart: time position (slide left for history)"><span class="mono small"></span><button class="small" title="jump to the newest second and keep following">Live</button></div></div>
       </div>
       <div id="flowRes" style="margin-top:12px"></div>
     </section>
@@ -247,20 +246,22 @@ const niceMax = v => { const e = Math.pow(10, Math.floor(Math.log10(v))); for (c
 const ticks = (a, b) => { const st = [1, 5, 10, 15, 20, 30, 60, 120, 300].find(s => (b - a) / s <= 12 && s >= ((b - a) <= 10 ? 1 : 5)) || 600; const out = []; for (let v = Math.ceil(a / st) * st; v <= b; v += st) out.push(v); return out; };
 const fmt = v => v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(1).replace(/\.0$/, '') : (+v.toFixed(2)).toString();
 
-let WIN = 60, VIEW_END = null;   // window length (s; 0 = whole run) and its right edge (null = follow the newest second)
-function viewRange(d, now) {
+let WIN = 60;   // window length (s; 0 = whole run)
+const VIEW = {cThr: null, cRtt: null, cRetr: null, cQ: null};   // each chart's right edge, s (null = follow the newest second)
+function viewRange(d, now, VIEW_END) {
   const span = d.mode === 'live' ? Math.max(now, 5) : Math.max(d.duration || 30, now);
   const w = WIN || span;
   if (w >= span) return {xmin: 0, xmax: d.mode === 'live' && WIN ? WIN : span, span, w, fits: true};
   const end = VIEW_END == null ? (d.mode === 'live' || d.running ? Math.max(now, w) : span) : Math.min(Math.max(VIEW_END, w), span);
   return {xmin: end - w, xmax: end, span, w, fits: false};
 }
-function syncHistory(v, now) {
-  const pos = $('#pos'); pos.disabled = v.fits; pos.min = Math.ceil(v.w); pos.max = Math.ceil(v.span);
-  if (!pos.dataset.drag) pos.value = v.fits ? pos.max : Math.round(v.xmax);
-  $('#winVal').innerHTML = WIN ? `${WIN} <small>s</small>` : 'whole run';
-  $('#posVal').innerHTML = v.fits ? `<small class="mute">all ${Math.round(v.span)} s shown</small>` : VIEW_END == null ? (chartData && chartData.running ? 'live' : `${Math.round(v.xmin)}–${Math.round(v.xmax)} <small>s (end)</small>`) : `${Math.round(v.xmin)}–${Math.round(v.xmax)} <small>s</small>`;
-  $('#followBtn').style.display = VIEW_END != null && chartData && chartData.running ? '' : 'none';
+function syncPos(c, v, running) {   // the slider under chart c: 5 s steps; at the right end the chart follows live
+  const el = document.querySelector(`.pos[data-c="${c}"]`), r = el.querySelector('input'), lbl = el.querySelector('span'), b = el.querySelector('button');
+  const lo = Math.floor(v.w / 5) * 5, hi = Math.max(lo, Math.ceil(v.span / 5) * 5);
+  r.disabled = v.fits; r.min = lo; r.max = hi;
+  if (!r.dataset.drag) r.value = v.fits || VIEW[c] == null ? hi : Math.round(v.xmax / 5) * 5;
+  lbl.textContent = v.fits ? `0–${Math.round(v.xmax)} s` : `${Math.round(v.xmin)}–${Math.round(v.xmax)} s`;
+  b.style.display = VIEW[c] != null && !v.fits ? '' : 'none'; b.textContent = running ? 'Live' : 'End';
 }
 const MARK_KEYS = [['rtt_ms', v => `RTT ${v} ms`], ['rate_mbit', v => `${v} Mbit/s link`], ['loss_pct', v => `loss ${v} %`], ['buffer_bdp', v => `buffer ${v} BDP`], ['bitrate_mbit', v => `-b ${brText(v)}`]];
 function markLabels(d) {
@@ -276,23 +277,23 @@ function drawCharts() {
   for (const w of d.wanS || []) (q.q ||= []).push([rt(w.ts), w.q_ms]);
   const labels = markLabels(d), marks = (d.marks || []).filter(() => t0).map((m, i) => ({x: Math.max(0, m.ts - t0), label: labels[i]}));
   const now = all.length ? rt(Math.max(...all)) : 0, live = d.mode === 'live';
-  const v = viewRange(d, now), {xmin, xmax} = v; syncHistory(v, now);
+  $('#winVal').innerHTML = WIN ? `${WIN} <small>s</small>` : 'whole run';
+  const V = {}; for (const c in VIEW) { V[c] = viewRange(d, now, VIEW[c]); syncPos(c, V[c], d.running); }
+  const at = c => ({xmin: V[c].xmin, xmax: V[c].xmax});
   const rate = (d.wanNow || {}).rate_mbit, br = d.bitrateNow;
   const hl = [...(rate ? [{y: rate, label: `bottleneck ${rate} Mbit/s`}] : [])];
-  lineChart($('#cThr'), thr, {unit: 'Mbit/s', marks, xmin, xmax, hlines: hl, aria: 'throughput per algorithm over time'});
-  lineChart($('#cRtt'), rtt, {unit: 'ms', marks, xmin, xmax, ymin: 10, aria: 'round-trip time per algorithm over time'});
-  lineChart($('#cRetr'), retr, {unit: 'retransmits/s', marks, xmin, xmax, ymin: 5, aria: 'retransmits per second per algorithm'});
+  lineChart($('#cThr'), thr, {unit: 'Mbit/s', marks, ...at('cThr'), hlines: hl, aria: 'throughput per algorithm over time'});
+  lineChart($('#cRtt'), rtt, {unit: 'ms', marks, ...at('cRtt'), ymin: 10, aria: 'round-trip time per algorithm over time'});
+  lineChart($('#cRetr'), retr, {unit: 'retransmits/s', marks, ...at('cRetr'), ymin: 5, aria: 'retransmits per second per algorithm'});
   $('#qWrap').style.display = live || q.q ? '' : 'none';
-  lineChart($('#cQ'), q, {unit: 'ms', marks, xmin, xmax, ymin: 1, empty: 'sampled during a live test', aria: 'bottleneck queue over time'});
+  lineChart($('#cQ'), q, {unit: 'ms', marks, ...at('cQ'), ymin: 1, empty: 'sampled during a live test', aria: 'bottleneck queue over time'});
   $('#legend').innerHTML = (d.algos || ALGOS).map(a => `<span><i style="background:${color(a)}"></i>${LABEL[a]} <span class="mute">(${d.direction === 'b2a' ? 'b' : 'a'}-${a})</span></span>`).join('');
-  // the figures at the window's right edge: the newest second while following, the chosen moment when scrolled back
-  const back = VIEW_END != null && !v.fits, at = back ? xmax : Infinity;
-  const last = {}; for (const s of d.samples) if (rt(s.ts) <= at + 0.05) last[s.cc] = s;
-  const lw = (d.wanS || []).filter(w => rt(w.ts) <= at + 0.05).at(-1);
-  let brAt = d.bitrate0; for (const m of d.marks || []) if ('bitrate_mbit' in m && m.ts - t0 <= at) brAt = m.bitrate_mbit;
+  // the latest second, per algorithm
+  const last = {}; for (const s of d.samples) last[s.cc] = s;
+  const lw = (d.wanS || []).at(-1);
   const st = s => `<span style="margin-right:12px"><span class="sw" style="background:${color(s.cc)}"></span>${LABEL[s.cc]} <b>${fmt(s.mbps)}</b> Mbit/s · ${fmt(s.rtt_ms)} ms · ${s.retr || 0} retr</span>`;
-  $('#liveNow').innerHTML = (d.running || back) && Object.keys(last).length ? `<span class="mute">${back ? `at ${fmt(rt(Object.values(last)[0].ts))} s` : 'now'}:</span> ` + Object.values(last).map(st).join('') +
-    (lw ? `<span class="mute">queue ${fmt(lw.q_ms)} ms · drops ${fmt(lw.drops_s)}/s</span>` : '') + (live ? ` <span class="mute">· -b ${brText(back ? brAt : br)}</span>` : '') : '';
+  $('#liveNow').innerHTML = d.running && Object.keys(last).length ? '<span class="mute">now:</span> ' + Object.values(last).map(st).join('') +
+    (lw ? `<span class="mute">queue ${fmt(lw.q_ms)} ms · drops ${fmt(lw.drops_s)}/s</span>` : '') + (live ? ` <span class="mute">· -b ${brText(br)}</span>` : '') : '';
 }
 function liveTable(r) {
   const w = r.wan || {};
@@ -451,9 +452,12 @@ function algosChosen() { return ALGOS.filter(a => $('#al_' + a).checked); }
 $('#algoPick').innerHTML = ALGOS.map(a => `<label><input type="checkbox" id="al_${a}" checked> <span class="sw" style="background:${color(a)}"></span>${LABEL[a]}</label>`).join(' ');
 document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
 $('#win').addEventListener('input', e => { WIN = +e.target.value > 300 ? 0 : +e.target.value; drawCharts(); });
-$('#pos').addEventListener('input', e => { e.target.dataset.drag = 1; const v = +e.target.value; VIEW_END = v >= +e.target.max ? null : v; drawCharts(); });
-$('#pos').addEventListener('change', e => { delete e.target.dataset.drag; drawCharts(); });
-$('#followBtn').onclick = () => { VIEW_END = null; drawCharts(); };
+document.querySelectorAll('.pos').forEach(el => {
+  const c = el.dataset.c, r = el.querySelector('input');
+  r.addEventListener('input', () => { r.dataset.drag = 1; VIEW[c] = +r.value >= +r.max ? null : +r.value; drawCharts(); });
+  r.addEventListener('change', () => { delete r.dataset.drag; drawCharts(); });
+  el.querySelector('button').onclick = () => { VIEW[c] = null; drawCharts(); };
+});
 setMode('live'); showBr(BR[+$('#br').value]);
 $('#goBtn').onclick = async () => {
   if (liveGoing()) { try { await post('/api/live/stop', {}); $('#goBtn').disabled = true; $('#goBtn').textContent = 'stopping…'; } catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } return; }
@@ -467,7 +471,7 @@ async function startRun(mode, options) {
   try { const r = await post('/api/runs', {mode, options}); openRun(r.id); }
   catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
 }
-function openRun(id) { RUN = {id, log: []}; runSince = 0; VIEW_END = null; pollRun(); }
+function openRun(id) { RUN = {id, log: []}; runSince = 0; for (const c in VIEW) VIEW[c] = null; pollRun(); }
 const parseLines = (log, tag) => log.filter(l => l.line.startsWith(tag + ' ')).map(l => { try { return JSON.parse(l.line.slice(tag.length + 1)); } catch (e) { return null; } }).filter(Boolean);
 async function pollRun() {
   if (!RUN) return;
