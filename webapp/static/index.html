@@ -142,7 +142,7 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
       </div>
       <div class="small" id="liveNow" style="margin:0 0 6px"></div>
       <div class="charts">
-        <div><h3>Throughput <span>Mbit/s, per second (sender) · dashed: bottleneck rate</span></h3><div class="chart" id="cThr"></div><div class="pos" data-c="cThr"><input type="range" min="0" max="60" step="5" value="60" aria-label="throughput chart: time position (slide left for history)"><span class="mono small"></span><button class="small" title="jump to the newest second and keep following">Live</button></div></div>
+        <div><h3>Throughput <span>Mbit/s, per second (sender), scale 0–1 Gbit/s · dashed: bottleneck rate</span></h3><div class="chart" id="cThr"></div><div class="pos" data-c="cThr"><input type="range" min="0" max="60" step="5" value="60" aria-label="throughput chart: time position (slide left for history)"><span class="mono small"></span><button class="small" title="jump to the newest second and keep following">Live</button></div></div>
         <div><h3>RTT the sender sees <span>ms (smoothed RTT, TCP_INFO)</span></h3><div class="chart" id="cRtt"></div><div class="pos" data-c="cRtt"><input type="range" min="0" max="60" step="5" value="60" aria-label="RTT chart: time position (slide left for history)"><span class="mono small"></span><button class="small" title="jump to the newest second and keep following">Live</button></div></div>
         <div><h3>Retransmits <span>segments per second</span></h3><div class="chart" id="cRetr"></div><div class="pos" data-c="cRetr"><input type="range" min="0" max="60" step="5" value="60" aria-label="retransmits chart: time position (slide left for history)"><span class="mono small"></span><button class="small" title="jump to the newest second and keep following">Live</button></div></div>
         <div id="qWrap"><h3>Bottleneck queue <span>ms of queue at the tbf (live test)</span></h3><div class="chart" id="cQ"></div><div class="pos" data-c="cQ"><input type="range" min="0" max="60" step="5" value="60" aria-label="queue chart: time position (slide left for history)"><span class="mono small"></span><button class="small" title="jump to the newest second and keep following">Live</button></div></div>
@@ -214,7 +214,7 @@ function lineChart(el, series, opt) {
   const pts = keys.flatMap(k => series[k]), hl = opt.hlines || [];
   let ymax = opt.ymax || niceMax(Math.max(...pts.map(p => p[1]), ...hl.map(h => h.y * 1.05), opt.ymin || 1));
   const xf = opt.xfmt || (v => `${v}s`);
-  const x = v => L + (v - xmin) / (xmax - xmin) * (W - L - R), y = v => T + (1 - v / ymax) * (H - T - B);
+  const x = v => L + (v - xmin) / (xmax - xmin) * (W - L - R), y = v => T + (1 - Math.min(v, ymax) / ymax) * (H - T - B);   // above a fixed scale: drawn at the top (the tooltip has the value)
   const yt = [0, .25, .5, .75, 1].map(f => f * ymax), xt = ticks(xmin, xmax);
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opt.aria)}"><defs><clipPath id="${el.id}C"><rect x="${L}" y="${T - 3}" width="${W - L - R}" height="${H - T - B + 6}"/></clipPath></defs>`;
   s += yt.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`).join('');
@@ -303,8 +303,9 @@ function drawCharts() {
   const V = {}; for (const c of RUN_CHARTS) { V[c] = viewRange(d, now, VIEW[c]); syncPos(c, V[c], d.running); }
   const at = c => ({xmin: V[c].xmin, xmax: V[c].xmax});
   const rate = (d.wanNow || {}).rate_mbit, br = d.bitrateNow;
-  const hl = [...(rate ? [{y: rate, label: `bottleneck ${rate} Mbit/s`}] : [])];
-  lineChart($('#cThr'), thr, {unit: 'Mbit/s', marks, ...at('cThr'), hlines: hl, aria: 'throughput per algorithm over time'});
+  const THR_MAX = 1000;   // Mbit/s: the throughput chart's fixed scale (0–1 Gbit/s); faster seconds run off the top, the tooltip still has them
+  const hl = rate && rate <= THR_MAX ? [{y: rate, label: `bottleneck ${rate} Mbit/s`}] : [];
+  lineChart($('#cThr'), thr, {unit: 'Mbit/s', ymax: THR_MAX, marks, ...at('cThr'), hlines: hl, aria: 'throughput per algorithm over time'});
   lineChart($('#cRtt'), rtt, {unit: 'ms', marks, ...at('cRtt'), ymin: 10, aria: 'round-trip time per algorithm over time'});
   lineChart($('#cRetr'), retr, {unit: 'retransmits/s', marks, ...at('cRetr'), ymin: 5, aria: 'retransmits per second per algorithm'});
   $('#qWrap').style.display = live || q.q ? '' : 'none';

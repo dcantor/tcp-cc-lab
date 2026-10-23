@@ -2,6 +2,13 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.8.1] - 2026-10-23
+
+### Changed
+- The throughput chart has a fixed 0–1 Gbit/s scale, on the portal and in the PDF report. A second faster than 1 Gbit/s
+  is drawn at the top edge; the portal's tooltip and the tables still give the real value. A bottleneck above 1 Gbit/s
+  isn't drawn as a line, and the chart's caption gives its rate instead.
+
 ## [0.8.0] - 2026-10-23
 
 ### Added

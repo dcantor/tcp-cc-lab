@@ -231,7 +231,11 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
 
     kpis = "".join(f"<div class='kpi'><b><span class='sw' style='background:{COL[a]}'></span>{LABEL[a]}</b><span>{fmt(v)}</span> Mbit/s</div>" for a, v in kp.items())
     rate = wan0.get("rate_mbit")
-    figs = [("Throughput", "Mbit/s per second, sender side" + (" · dashed: bottleneck rate" if rate else ""), chart(ser("mbps"), "Mbit/s", xmax, mk, (rate, f"bottleneck {rate:g} Mbit/s") if rate else None)),
+    THR_MAX = 1000   # Mbit/s: the throughput chart's fixed scale, as on the portal
+    above = max([x["mbps"] for x in samples] + [0]) > THR_MAX
+    figs = [("Throughput", "Mbit/s per second, sender side, scale 0–1 Gbit/s" + (" · dashed: bottleneck rate" if rate and rate <= THR_MAX else f" · bottleneck {rate:g} Mbit/s, above the scale" if rate else "")
+             + (" · seconds above 1 Gbit/s are drawn at the top" if above else ""),
+             chart(ser("mbps"), "Mbit/s", xmax, mk, (rate, f"bottleneck {rate:g} Mbit/s") if rate and rate <= THR_MAX else None, ymax=THR_MAX)),
             ("RTT the sender sees", "smoothed RTT from TCP_INFO, ms", chart(ser("rtt_ms"), "ms", xmax, mk)),
             ("Retransmits", "segments per second", chart(ser("retr"), "retr/s", xmax, mk))]
     if wans:
