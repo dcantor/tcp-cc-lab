@@ -17,14 +17,17 @@ log as a MARK line, and the chart shows where it happened. Not while the tests r
 Sign-in is the Lab Hub's (labportal.gate). Start with ./lab.sh webapp (port 8112)."""
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
 import time
+from collections import deque
+from html import escape
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from labportal import RunBase, RunRegistry, install_runs_api, gate, run_metrics, exposition, metrics_generated, metric_line as line
 from pydantic import BaseModel, Field
 
@@ -144,9 +147,125 @@ def active_run():
     a = registry.active(); return a
 
 
+# ---- node CPU and memory: one long-lived SSH per node streams /proc/stat and /proc/meminfo every second ------------------
+STATS_KEEP = 1800   # samples per node (30 min at 1 s)
+STATS_LOOP = ("while :; do head -1 /proc/stat; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo; nproc; echo .; sleep 1; done")
+_stats = {}   # node -> {"vcpus", "samples": deque([ts, cpu_pct, mem_used_mb, mem_total_mb])}
+
+
+def _stats_worker(name):
+    """Keeps one SSH session to the node open (reconnecting when the node is off or rebooting) and turns each block into a sample."""
+    st = _stats.setdefault(name, {"vcpus": None, "samples": deque(maxlen=STATS_KEEP)})
+    while True:
+        try:
+            n = C.node(name)
+            p = subprocess.Popen([*C.SSH, "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", f"{n['user']}@{n['mgmt_ip']}", STATS_LOOP],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            prev, blk = None, []
+            for l in p.stdout:
+                l = l.strip()
+                if l != ".": blk.append(l); continue
+                try:
+                    cpu = [int(x) for x in blk[0].split()[1:9]]; mem = {k.split(":")[0]: int(k.split()[1]) for k in blk[1:3]}
+                    st["vcpus"] = int(blk[3])
+                    if prev:
+                        tot = sum(cpu) - sum(prev); idle = (cpu[3] + cpu[4]) - (prev[3] + prev[4])
+                        st["samples"].append([round(time.time(), 2), round(100 * (tot - idle) / tot, 1) if tot > 0 else 0.0,
+                                              round((mem["MemTotal"] - mem["MemAvailable"]) / 1024, 1), round(mem["MemTotal"] / 1024, 1)])
+                    prev = cpu
+                except (IndexError, ValueError, KeyError): pass
+                blk = []
+            p.wait()
+        except Exception: pass   # noqa: BLE001
+        time.sleep(10)
+
+
+def start_stats():
+    for n in C.inventory()["nodes"]: threading.Thread(target=_stats_worker, args=(n["name"],), daemon=True).start()
+
+
+# ---- device configuration pages (the topology links here) ------------------------------------------------------------
+HOST_SECTIONS = [
+    ("System", "uname -sr; echo; echo \"$(nproc) vCPU\"; free -m"),
+    ("Interfaces", "ip -br addr; echo; ip -d link show eth1 | head -2"),
+    ("Routes", "ip route"),
+    ("Queueing discipline on eth1 (fq: pacing for the sender)", "tc -s qdisc show dev eth1"),
+    ("Congestion control", "echo \"in use:    $(sysctl -n net.ipv4.tcp_congestion_control)\"; echo \"available: $(sysctl -n net.ipv4.tcp_available_congestion_control)\"; echo \"default qdisc: $(sysctl -n net.core.default_qdisc)\""),
+    ("TCP and socket settings (sysctl net.ipv4.tcp_* and net.core.*)", "sysctl -a 2>/dev/null | grep -E '^net\\.(ipv4\\.tcp_|core\\.)' | grep -v '_entries'"),
+    ("Settings applied at boot (/etc/sysctl.d)", "for f in /etc/sysctl.d/*.conf; do echo \"# $f\"; cat \"$f\"; echo; done"),
+    ("iperf3", "iperf3 --version | head -1; echo; ps -o pid,args | grep '[i]perf3'"),
+]
+NODE_SECTIONS = {
+    "host": HOST_SECTIONS,
+    "wanem": [
+        ("Emulator settings and qdiscs (wanem show)", "doas wanem show"),
+        ("Defaults (/etc/wanem.conf)", "cat /etc/wanem.conf"),
+        ("Bridge", "ip -br addr; echo; bridge link"),
+        ("Offloads (must be off: the qdiscs see wire-size packets)", "doas wanem offloads"),
+        ("The control script (/usr/local/bin/wanem)", "cat /usr/local/bin/wanem"),
+        ("System", "uname -sr; echo; echo \"$(nproc) vCPU\"; free -m"),
+    ],
+    "router": [
+        ("Configuration (show configuration commands)", "/opt/vyatta/bin/vyatta-op-cmd-wrapper show configuration commands"),
+        ("Interfaces", "/opt/vyatta/bin/vyatta-op-cmd-wrapper show interfaces"),
+        ("Routes", "/opt/vyatta/bin/vyatta-op-cmd-wrapper show ip route"),
+        ("Version", "/opt/vyatta/bin/vyatta-op-cmd-wrapper show version | head -12"),
+        ("System", "echo \"$(nproc) vCPU\"; free -m"),
+    ],
+}
+CONFIG_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{name} configuration</title>
+<script>try {{ const t = localStorage.getItem('portal-theme'); if (t) document.documentElement.dataset.theme = t; }} catch (e) {{ }}</script>
+<style>
+:root {{ --bg:#f6f7f9; --panel:#fcfcfb; --ink:#1f2937; --mute:#52514e; --line:#e5e7eb; --code:#f3f4f6; --accent:#2563eb; --bad:#dc2626; }}
+@media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{ --bg:#0f141b; --panel:#1a1a19; --ink:#f0efec; --mute:#c3c2b7; --line:#2c2c2a; --code:#121211; --accent:#60a5fa; --bad:#f87171; }} }}
+:root[data-theme="dark"] {{ --bg:#0f141b; --panel:#1a1a19; --ink:#f0efec; --mute:#c3c2b7; --line:#2c2c2a; --code:#121211; --accent:#60a5fa; --bad:#f87171; }}
+* {{ box-sizing:border-box; }} body {{ margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }}
+header {{ padding:14px 16px; background:var(--panel); border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; }}
+header h1 {{ font-size:18px; margin:0; }} header .mute {{ color:var(--mute); }} header .right {{ margin-left:auto; display:flex; gap:12px; }}
+a {{ color:var(--accent); }} main {{ max-width:1100px; margin:0 auto; padding:16px; }}
+nav {{ display:flex; flex-wrap:wrap; gap:6px 14px; margin-bottom:12px; font-size:13px; }}
+section {{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:14px; }}
+h2 {{ font-size:14px; margin:0 0 8px; }}
+pre {{ background:var(--code); border:1px solid var(--line); border-radius:6px; padding:10px; margin:0; overflow:auto; font:12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space:pre; }}
+.bad {{ color:var(--bad); }}
+</style></head><body>
+<header><h1>{name}</h1><span class="mute">{role} · {mgmt} · collected {when}</span><span class="right"><a href="">Refresh</a><a href="/">Portal</a></span></header>
+<main><nav>{nav}</nav>{body}</main></body></html>"""
+
+
+def config_html(name):
+    n = C.node(name); role = n["role"]
+    script = "".join(f"echo '@@{i}'; {{ {cmd} ; }} 2>&1; " for i, (_, cmd) in enumerate(NODE_SECTIONS[role]))
+    try: rc, out = C.run(name, script, timeout=30)
+    except Exception as e: rc, out = 255, f"@@0\n{e}"   # noqa: BLE001
+    out = re.sub(r"(encrypted-password|plaintext-password) '[^']*'", r"\1 '<redacted>'", out)   # VyOS login hash: not for a web page
+    parts, cur = {}, None
+    for l in out.splitlines():
+        if l.startswith("@@") and l[2:].isdigit(): cur = int(l[2:]); parts[cur] = []; continue
+        if cur is not None: parts[cur].append(l)
+    body = "".join(f'<section id="s{i}"><h2>{escape(t)}</h2><pre>{escape(chr(10).join(parts.get(i, [])).rstrip()) or "<span class=bad>no output (is the node running?)</span>"}</pre></section>'
+                   for i, (t, _) in enumerate(NODE_SECTIONS[role]))
+    nav = " ".join(f'<a href="#s{i}">{escape(t.split(" (")[0])}</a>' for i, (t, _) in enumerate(NODE_SECTIONS[role]))
+    desc = {"host": f"host, {({'cubic': 'CUBIC', 'bbr': 'BBR', 'reno': 'Reno'}).get(n['cc'], n['cc'])}, data {n['ip']}",
+            "wanem": "WAN emulator (Alpine, netem + tbf on a bridge)", "router": f"router (VyOS), data {n['ip']}"}[role]
+    return CONFIG_PAGE.format(name=escape(name), role=escape(desc), mgmt=escape(f"{n['user']}@{n['mgmt_ip']}"), when=time.strftime("%Y-%m-%d %H:%M:%S"), nav=nav, body=body)
+
+
 # ---- API -------------------------------------------------------------------------------------------------------------
 @app.get("/", include_in_schema=False)
 def index(): return FileResponse(STATIC / "index.html")
+
+
+@app.get("/config/{name}", tags=["lab"], summary="One node's configuration, collected live (HTML page; the topology links here)", response_class=HTMLResponse)
+def node_config(name: str):
+    if name not in C.inventory()["by_name"]: raise HTTPException(404, "no such node")
+    return HTMLResponse(config_html(name))
+
+
+@app.get("/api/nodestats", tags=["lab"], summary="Each node's CPU (% of its vCPUs) and memory in use (MemTotal - MemAvailable), one sample a second, last 30 min")
+def nodestats(since: float = 0):
+    return {"now": time.time(), "nodes": {k: {"vcpus": v["vcpus"], "samples": [x for x in v["samples"] if x[0] > since]} for k, v in _stats.items()}}
 
 
 @app.get("/api/lab", tags=["lab"], summary="What the lab is: nodes, the WAN defaults and limits, the suites")
@@ -432,6 +551,7 @@ def metrics():
 
 
 def main():
+    start_stats()
     import uvicorn; uvicorn.run(app, host=os.environ.get("WEBAPP_HOST", "0.0.0.0"), port=PORT)
 
 

@@ -15,7 +15,7 @@ TCP congestion control across an emulated WAN: CUBIC, BBR and Reno side by side,
 | a-cubic / a-bbr / a-reno | Alpine hosts in site A, one algorithm each, iperf3 server | .31–.33 |
 | b-cubic / b-bbr / b-reno | the same in site B (each host's peer is the same algorithm on the other side) | .41–.43 |
 
-Libvirt/KVM (QEMU) like the other labs. MTU: hosts 1500 or 9000 (switchable), routers and wanem 9000 (always); ~3.8 GiB RAM. Domains `tcpcc-<node>`, consoles 127.0.0.1:5601–5609, MACs
+Libvirt/KVM (QEMU) like the other labs. MTU: hosts 1500 or 9000 (switchable), routers and wanem 9000 (always); 9 GiB RAM (1 GiB per VM: 6 hosts with 1 vCPU each, wanem, r1 and r2 with 2). Domains `tcpcc-<node>`, consoles 127.0.0.1:5601–5609, MACs
 `52:54:00:ce:*`. Users: routers vyos / vyos, hosts and wanem lab / lab; your SSH key is installed on all of them.
 
 ## Quick start
@@ -35,6 +35,17 @@ Portal: http://192.168.50.231:8112 (user unit `tcp-cc-lab-webapp`, Lab Hub sign-
 default 30) applies when released, with `tc qdisc change`, so a running flow keeps going and the chart marks the change. The bottleneck rate slider goes from 10 Mbit/s to 5 Gbit/s.
 The VMs forward about 2–2.5 Gbit/s at host MTU 1500 and 3.5–4 Gbit/s at 9000, so above that the path is the limit,
 not the bottleneck; the bottleneck buffer is capped at 128 MB.
+
+**Nodes: CPU and memory** (portal card): each node keeps one SSH session open to the portal, streaming its own
+`/proc/stat` and `/proc/meminfo` once a second (the last 30 min are kept; `GET /api/nodestats`). There's a table with
+CPU now, CPU averaged over 60 s, and memory in use, plus a CPU % chart and a memory MB chart. These charts have their
+own window slider and a history slider under each chart. Untick a node to hide it.
+
+**Topology**: click any device (or a node in that table) to open `/config/<node>` in a new tab, with its configuration
+collected live:
+- hosts: system, interfaces, routes, the fq qdisc, congestion control, every TCP/socket sysctl, `/etc/sysctl.d`, iperf3;
+- wanem: `wanem show`, its defaults, the bridge, offloads, the control script;
+- r1 and r2: `show configuration commands` with the password hash redacted, interfaces, routes, version.
 
 **Live test** (the portal's default flow mode): the chosen algorithms run at once until you press Stop (at most 2–30
 min). Four charts update every second, with a time grid every 5 s: throughput,

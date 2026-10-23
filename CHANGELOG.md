@@ -2,6 +2,26 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.7.0] - 2026-10-23
+
+### Changed
+- Every host and wanem now has 1 GiB of RAM (it was 256 MiB for the hosts and 512 MiB for wanem; lab.conf
+  `RAM_MIB`, and the defined domains changed with `virsh setmaxmem/setmem --config` and restarted). vCPUs are
+  unchanged. The kernel sizes `tcp_mem` from the RAM, so the hosts' TCP memory limit rose by itself: pressure is now
+  at about 58 MB (it was 13 MB) and the hard limit at about 87 MB (it was 20 MB). Every other host setting is the same
+  (checked: sysctls, fq, MTU, iperf3; `lab.sh verify` 9/9). The PDF's results were measured with the old 256 MiB
+  hosts.
+
+### Added
+- Portal card "Nodes: CPU and memory". One SSH session per node streams `/proc/stat` and `/proc/meminfo` each second,
+  kept for 30 min (`GET /api/nodestats`). The card has a table (vCPU, CPU now, 60 s average, memory in use and RAM)
+  and two live charts: CPU % and memory in use. The charts have their own window slider and a history slider each,
+  labelled in clock time. Untick a node to hide it.
+- Clicking a device in the topology (or a node in that table) opens `/config/<node>` in a new tab: its configuration,
+  collected live over SSH. VyOS password hashes are redacted.
+- Line charts drop the labels at the ends of the lines when there are more than 4 series (the legend or table names
+  them). Dashed lines mark site B hosts and r2.
+
 ## [0.6.1] - 2026-10-23
 
 ### Changed
