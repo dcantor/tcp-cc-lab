@@ -2,6 +2,7 @@
 the results, and the nodes' CPU and memory while it ran. Built as one HTML file (inline SVG) and printed to PDF by
 headless Chrome from a file:// URL (Chrome on this host hangs on http:// pages)."""
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -122,10 +123,70 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-sp
 .legend svg { vertical-align: 0; margin-right: 4px; } .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
 .note { color: #52514e; font-size: 9pt; } .bad { color: #b91c1c; }
 header { border-bottom: 2px solid #1f2937; padding-bottom: 8px; margin-bottom: 6px; }
+h2 { counter-increment: none; } h2.page, .page { break-before: page; }
+p { margin: 5px 0; } ul { margin: 4px 0; padding-left: 20px; } li { margin: 2px 0; }
+/* the title page */
+.cover { height: 265mm; display: flex; flex-direction: column; break-after: page; }
+.cover .band { background: #1f2937; color: #fff; margin: 0 -13mm; padding: 16mm 13mm 10mm; }
+.cover .kicker { font-size: 10pt; letter-spacing: .12em; text-transform: uppercase; color: #cbd5e1; }
+.cover h1 { font-size: 26pt; line-height: 1.15; margin: 8px 0 6px; color: #fff; } .cover .lede { font-size: 11.5pt; color: #e5e7eb; margin: 0; }
+.cover .topo { margin: 10mm 0 4mm; } .cover .meta { margin-top: auto; width: 100%; } .cover .meta th { width: 28%; }
+.cover .contents { columns: 2; font-size: 10pt; margin: 6px 0 0; padding-left: 18px; }
+/* appendix */
+pre.cfg { font: 7.6pt/1.35 "DejaVu Sans Mono", ui-monospace, monospace; background: #f6f7f9; border: 1px solid #e5e7eb; border-radius: 4px; padding: 6px 8px;
+  white-space: pre-wrap; word-break: break-all; margin: 2px 0 8px; }
+pre.cfg.two { columns: 2; column-gap: 14px; }
+h4 { font-size: 9.5pt; margin: 8px 0 2px; color: #374151; break-after: avoid; }
+.callout { border-left: 3px solid #2a78d6; background: #f3f7fd; padding: 6px 10px; margin: 8px 0; break-inside: avoid; }
 """
 
 
-def build_html(run, lab_version, node_stats, host_info=None):
+def topo_svg(inv, wan, w=680):
+    """The lab as a diagram: three hosts per site, r1 - wanem - r2 between them (print colours)."""
+    nodes = {n["name"]: n for n in (inv or {}).get("nodes", [])}
+    ip = lambda n: (nodes.get(n) or {}).get("ip", "")   # noqa: E731
+    s = [f"<svg viewBox='0 0 {w} 250' xmlns='http://www.w3.org/2000/svg' style='width:100%;font-size:10.5px'>"]
+    hy = [18, 98, 178]
+    def box(x, y, bw, bh, title, sub, stroke="#94a3b8", fill="#fff", bar=None):
+        out = f"<rect x='{x}' y='{y}' width='{bw}' height='{bh}' rx='6' fill='{fill}' stroke='{stroke}' stroke-width='1.4'/>"
+        if bar: out += f"<rect x='{x}' y='{y}' width='5' height='{bh}' rx='2' fill='{bar}'/>"
+        return out + f"<text x='{x + bw / 2}' y='{y + 17}' text-anchor='middle' font-weight='700'>{E(title)}</text><text x='{x + bw / 2}' y='{y + 31}' text-anchor='middle' fill='#52514e' font-size='9.5'>{E(sub)}</text>"
+    for i, a in enumerate(("cubic", "bbr", "reno")):
+        s.append(f"<path d='M132 {hy[i] + 22} H150 M{w - 132} {hy[i] + 22} H{w - 150}' stroke='#94a3b8' stroke-width='2' fill='none'/>")
+    s.append(f"<path d='M150 40 V200 M{w - 150} 40 V200 M150 120 H175 M235 120 H260 M{w - 260} 120 H{w - 235} M{w - 175} 120 H{w - 150}' stroke='#94a3b8' stroke-width='2' fill='none'/>")
+    for i, a in enumerate(("cubic", "bbr", "reno")):
+        s.append(box(6, hy[i], 126, 44, f"a-{a}", f"{LABEL[a]} · {ip('a-' + a)}", bar=COL[a]))
+        s.append(box(w - 132, hy[i], 126, 44, f"b-{a}", f"{LABEL[a]} · {ip('b-' + a)}", bar=COL[a]))
+    s.append(box(175, 98, 60, 44, "r1", "VyOS")); s.append(box(w - 235, 98, 60, 44, "r2", "VyOS"))
+    wt = f"{wan.get('rtt_ms', 0):g} ms · {wan.get('rate_mbit', 0):g} Mbit/s" if wan else "netem + tbf"
+    s.append(box(260, 92, w - 520, 56, "wanem", wt, stroke="#b45309", fill="#fff4e5"))
+    s.append(f"<text x='{w / 2}' y='166' text-anchor='middle' fill='#52514e' font-size='9.5'>loss {wan.get('loss_pct', 0):g} % · buffer {wan.get('buffer_bdp', 0):g} × BDP</text>" if wan else "")
+    s.append(f"<text x='69' y='240' text-anchor='middle' fill='#52514e'>site A · 192.168.141.0/24</text><text x='{w - 69}' y='240' text-anchor='middle' fill='#52514e'>site B · 192.168.142.0/24</text>"
+             f"<text x='{w / 2}' y='240' text-anchor='middle' fill='#52514e'>WAN 100.64.14.0/30 (r1 .1, r2 .2) through the wanem bridge</text></svg>")
+    return "".join(s)
+
+
+HOST_KEYS = [("net.ipv4.tcp_congestion_control", "the algorithm (the only setting that differs between hosts)"), ("net.core.default_qdisc", "qdisc for new interfaces (fq: pacing)"),
+             ("net.ipv4.tcp_rmem", "receive buffer min / default / max, bytes"), ("net.ipv4.tcp_wmem", "send buffer min / default / max, bytes"),
+             ("net.core.rmem_max", "largest receive buffer an application may set"), ("net.core.wmem_max", "largest send buffer an application may set"),
+             ("net.ipv4.tcp_mem", "TCP memory: low / pressure / max, 4 kB pages (sized by the kernel from RAM)"),
+             ("net.ipv4.tcp_no_metrics_save", "1: no cached ssthresh / RTT between connections"), ("net.ipv4.tcp_window_scaling", "window scaling"),
+             ("net.ipv4.tcp_sack", "selective acknowledgements"), ("net.ipv4.tcp_timestamps", "timestamps"), ("net.ipv4.tcp_ecn", "ECN (2: accept, do not request)")]
+
+
+def sysctls(text):
+    out = {}
+    for l in (text or "").splitlines():
+        if " = " in l: k, v = l.split(" = ", 1); out[k.strip()] = " ".join(v.split())
+    return out
+
+
+def section_text(configs, node, prefix):
+    return next((t for title, t in (configs or {}).get(node, []) if title.startswith(prefix)), "")
+
+
+
+def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=None, author="Daniel Cantor"):
     mode, o, res = run["mode"], run.get("options") or {}, run.get("result") or {}
     log = run.get("log") or []
     samples, wans, marks, start = lines(log, "SAMPLE"), lines(log, "WAN"), lines(log, "MARK"), (lines(log, "START") or [None])[0]
@@ -204,13 +265,114 @@ def build_html(run, lab_version, node_stats, host_info=None):
              ("Sender bit rate", f"{br:g} Mbit/s per flow (iperf3 -b)" if br else "unlimited (no -b)"),
              ("WAN at the start", f"RTT {wan0.get('rtt_ms', '–'):g} ms · bottleneck {wan0.get('rate_mbit', 0):g} Mbit/s · random loss {wan0.get('loss_pct', 0):g} % each way · buffer {wan0.get('buffer_bdp', 0):g} × BDP" if wan0 else "–"),
              ("Hosts", (f"MTU {mtu} · " if mtu else "") + E(host_info or "Alpine Linux VMs, fq qdisc on eth1"))]
-    body = f"""<header><h1>Flow test report</h1><div class='sub'>tcp-cc-lab {E(lab_version)} · TCP congestion control (CUBIC, BBR, Reno) across an emulated WAN · generated {time.strftime('%Y-%m-%d %H:%M')}</div></header>
+    # ---- narrative pieces
+    ln = lambda a: LABEL.get(a, a)   # noqa: E731
+    rank = sorted(kp.items(), key=lambda x: -x[1])
+    wtxt = (f"RTT {wan0.get('rtt_ms', 0):g} ms, a {wan0.get('rate_mbit', 0):g} Mbit/s bottleneck, {wan0.get('loss_pct', 0):g} % random loss and a "
+            f"{wan0.get('buffer_bdp', 0):g} × BDP buffer") if wan0 else "the WAN as set"
+    if mode == "compete":
+        fl = res.get("flows", []); tot = res.get("total_mbps") or 0
+        summary = (f"{len(fl)} flows ran at the same time, one per algorithm, through the same bottleneck for {o.get('duration')} s, with {wtxt}. "
+                   + ", ".join(f"{ln(a)} carried {fmt(v)} Mbit/s ({100 * v / max(tot, 1e-9):.0f} %)" for a, v in rank) + ". "
+                   f"Together they used {fmt(tot)} Mbit/s, {100 * tot / max(wan0.get('rate_mbit') or 1, 1e-9):.0f} % of the bottleneck; Jain's fairness index was {res.get('jain_fairness')} "
+                   f"(1 = equal shares).")
+    elif mode == "solo":
+        summary = (f"Each algorithm ran alone, one after the other, for {o.get('duration')} s each, with {wtxt}. "
+                   + ", ".join(f"{ln(a)} reached {fmt(v)} Mbit/s" for a, v in rank) + f" ({100 * rank[0][1] / max(wan0.get('rate_mbit') or 1, 1e-9):.0f} % of the bottleneck for the fastest)." if rank else "")
+    else:
+        summary = (f"The flows ran together for {res.get('seconds', 0):g} s, starting with {wtxt} and "
+                   + (f"a sender bit rate of {br:g} Mbit/s per flow. " if br else "no sender bit-rate limit. ")
+                   + (f"{len(mk)} change{'s were' if len(mk) != 1 else ' was'} made while they ran (section 3). " if mk else "Nothing was changed while they ran. ")
+                   + "Averaged over the run (time-weighted across the flows' segments): " + ", ".join(f"{ln(a)} {fmt(v)} Mbit/s" for a, v in rank) + ".")
+    if run.get("error"): summary += f" The run ended with an error: {run['error']}."
+
+    # ---- section 2: the lab
+    cfg = configs or {}
+    hs = [n["name"] for n in (inv or {}).get("nodes", []) if n["role"] == "host"]
+    sy = {h: sysctls(section_text(cfg, h, "TCP and socket")) for h in hs}
+    ref = sy.get("a-cubic") or next(iter(sy.values()), {})
+    diffs = sorted({k for h in hs for k in set(sy[h]) | set(ref) if k != "net.ipv4.tcp_congestion_control" and sy[h].get(k) != ref.get(k)}) if ref else []
+    same = ("<p><b>Checked when this report was made:</b> all six hosts have identical TCP and socket settings (" + str(len(ref)) + " sysctls) apart from the congestion control.</p>"
+            if ref and not diffs else (f"<p class='bad'>The hosts' settings differ in: {E(', '.join(diffs[:12]))}</p>" if ref else "<p class='note'>(The hosts' settings could not be read when this report was made.)</p>"))
+    uname = section_text(cfg, "a-cubic", "System").splitlines()[:1]
+    iperf = section_text(cfg, "a-cubic", "iperf3").splitlines()[:1]
+    vmrows = []
+    stats_src = run.get("node_stats") or node_stats
+    for n in (inv or {}).get("nodes", []):
+        last = (stats_src.get(n["name"]) or [None])[-1]
+        cpus = re.search(r"(\d+) vCPU", section_text(cfg, n["name"], "System"))
+        vmrows.append(f"<tr><td class='mono'>{E(n['name'])}</td><td>{E({'host': 'host', 'router': 'router (VyOS)', 'wanem': 'WAN emulator'}[n['role']])}</td>"
+                      f"<td>{E(ln(n['cc'])) if n['cc'] else '–'}</td><td class='mono'>{E(n['ip'] if n['role'] != 'wanem' else 'bridge')}</td><td class='mono'>{E(n['mgmt_ip'])}</td>"
+                      f"<td class='num'>{cpus.group(1) if cpus else '–'}</td><td class='num'>{f'{last[3] / 1000:.1f} GB' if last else '–'}</td></tr>")
+    keyrows = "".join(f"<tr><td class='mono'>{E(k)}</td><td class='mono'>{E(ref.get(k, '–')) if k != 'net.ipv4.tcp_congestion_control' else 'cubic / bbr / reno'}</td><td>{E(d)}</td></tr>" for k, d in HOST_KEYS)
+    lab_html = f"""<h2>2. The lab</h2>
+<p>The lab is nine KVM virtual machines on one Linux host, joined by isolated libvirt networks. There are two sites. Each has three Alpine Linux hosts, one per congestion control algorithm (CUBIC, BBR, Reno), behind a VyOS router. The routers are joined by <b>wanem</b>, a Linux bridge that adds the WAN's delay, loss and bottleneck. Every host on site A has a peer on site B running the same algorithm. Static routes send all site-to-site traffic through wanem. A separate management network (10.14.0.0/24) carries SSH and the measurements, so they never cross the emulated WAN.</p>
+<div class='fig'>{topo_svg(inv, wan0)}</div>
+<table><tr><th>Node</th><th>Role</th><th>Algorithm</th><th>Data address</th><th>Management</th><th class='num'>vCPU</th><th class='num'>RAM</th></tr>{''.join(vmrows)}</table>
+<h3>The WAN emulator</h3>
+<p>wanem bridges eth1 (towards r1) and eth2 (towards r2). Traffic leaving each port goes through two queueing disciplines, so both directions are impaired the same way:</p>
+<ul><li><b>netem</b> adds half the round-trip time as a fixed delay, plus random, independent loss when a loss is set. Its queue is large enough to hold everything in flight on the delay line.</li>
+<li><b>tbf</b> (token bucket filter) is the bottleneck. It sends at the set rate and queues the excess in a buffer of BUFFER × BDP bytes (BDP = rate × RTT; at least 36 kB, at most 128 MB). When that buffer is full, packets are dropped. This is the queue a congestion control fills.</li></ul>
+<p>The NICs' segmentation and receive offloads are off on wanem, so the qdiscs see wire-size packets. Changes are made with <span class='mono'>tc qdisc change</span>, in place: a running flow sees a new RTT, rate, loss or buffer on its next packets without being restarted. The routers' and wanem's links run at MTU 9000.</p>
+<h3>The hosts</h3>
+<p>All six hosts are built from the same image ({E(uname[0]) if uname else 'Alpine Linux'}) and have the same settings. The only difference is the congestion control each one is set to. eth1 uses the fq qdisc, which paces each flow at the rate its congestion control asks for (BBR depends on it). Each site B host runs an iperf3 server on port 5201 ({E(iperf[0]) if iperf else 'iperf3'}).</p>
+<table><tr><th>Setting</th><th>Value</th><th>Meaning</th></tr>{keyrows}</table>
+{same}"""
+
+    # ---- section 3: how this run was tested
+    how = {"compete": f"All {len(algos)} flows started together{f' ({o.get('stagger'):g} s apart)' if o.get('stagger') else ''} and ran for {o.get('duration')} s, competing for the one bottleneck. This shows how the algorithms share a link: who takes what, how fair that is, and what each one does to the queue and to the others' RTT.",
+           "solo": f"Each algorithm ran alone for {o.get('duration')} s, one after the other with 2 s between them, so the bottleneck was never shared. This shows what each algorithm achieves on this path by itself.",
+           "live": "The flows ran together until the run was stopped. While they ran, the WAN and the sender bit rate could be changed from the portal, and each change is listed below with its time. WAN changes apply in place to the running flows. iperf3 cannot change its bit rate during a test, so a bit-rate change stops the flows (SIGINT, so iperf3 ends its test cleanly) and starts new ones with the new -b. Each new flow is a new TCP connection and starts in slow start."}[mode]
+    method_html = f"""<h2 class='page'>3. How this run was tested</h2>
+<p>{how}</p>
+<ul><li><b>Traffic:</b> one TCP connection per algorithm, from the site {'A' if o.get('direction', 'a2b') == 'a2b' else 'B'} host to its peer, started by the portal over SSH: <span class='mono'>{cmd}</span>. There is no <span class='mono'>-P</span>, so each flow is a single stream.</li>
+<li><b>Per-second data:</b> iperf3's <span class='mono'>--json-stream</span> reports every second, from the sender's TCP_INFO: bytes sent (throughput), the smoothed RTT, the congestion window and retransmits.</li>
+<li><b>Whole-flow figures:</b> {'from the per-second samples of each flow segment (a stopped iperf3 reports no receiver total).' if mode == 'live' else "iperf3's final report. Mbit/s is the receiver's goodput over the whole flow, start-up included."}</li>
+{'<li><b>Bottleneck queue:</b> wanem&#39;s tbf counters (bytes, drops, backlog) are read once a second over SSH.</li>' if wans else ''}
+<li><b>CPU and memory:</b> each node's own /proc/stat and /proc/meminfo, once a second, over one SSH session per node.</li>
+<li><b>Integrity:</b> {'the kernel reported the expected algorithm for every flow.' if all(f.get('cc_reported') in (None, f['cc']) for f in res.get('flows', res.get('segments', []))) else '<span class=bad>a flow reported a different algorithm than its host is set to (see the results).</span>'}</li></ul>
+<h3>Run parameters</h3><table>{''.join(f'<tr><th style="width:24%">{k}</th><td>{v}</td></tr>' for k, v in setup)}</table>
+<h3>Changes during the run</h3>{chg}"""
+
+    # ---- appendices
+    app_a = ""
+    if cfg:
+        app_a = (f"<h2 class='page'>Appendix A. Device configurations</h2><p class='note'>Collected from each device over SSH when this report was made ({time.strftime('%Y-%m-%d %H:%M')}), after the run. "
+                 "The WAN emulator therefore shows its settings at that moment; the settings during the run are in section 3. VyOS password hashes are redacted.</p>")
+        for k, n in enumerate([n for name in NODE_ORDER for n in (inv or {}).get("nodes", []) if n["name"] == name]):
+            secs = cfg.get(n["name"], [])
+            if n["role"] == "host" and n["name"] != "a-cubic" and ref and not diffs:   # verified identical: print the list once (A.1)
+                secs = [(t, f"Identical to a-cubic (A.1) apart from net.ipv4.tcp_congestion_control = {n['cc']}: checked over all {len(ref)} settings.") if t.startswith("TCP and socket") else (t, txt) for t, txt in secs]
+            app_a += (f"<h3 class='{'page' if k else ''}'>A.{k + 1} {E(n['name'])} <span class='sub'>— {E({'host': 'host, ' + ln(n['cc']), 'router': 'router (VyOS)', 'wanem': 'WAN emulator'}[n['role']])}, management {E(n['mgmt_ip'])}</span></h3>" +
+                      "".join(f"<h4>{E(t)}</h4><pre class='cfg{' two' if t.startswith('TCP and socket') else ''}'>{E(txt) or '(no output)'}</pre>" for t, txt in secs))
+    events = [l for l in log if not l["line"].startswith(("SAMPLE ", "WAN "))]
+    mk_iter = iter(labels)
+    def logline(t, it):   # START / MARK records in words
+        if t.startswith("MARK "): return "changed: " + next(it, t[5:])
+        if t.startswith("START "): return f"start: {wtxt}" + (f", -b {br:g}M" if br else ", no -b")
+        return t
+    app_b = ("<h2 class='page'>Appendix B. Run log</h2><p class='note'>The run's own log, without the per-second samples; times from the start of the run.</p><pre class='cfg'>" +
+             E("\n".join(f"{l['t'] - started:7.1f}s  {logline(l['line'], mk_iter)}" for l in events)) + "</pre>")
+
+    toc = ["1. Summary", "2. The lab", "3. How this run was tested", "4. Results", "5. Nodes during the run"] + (["Appendix A. Device configurations"] if cfg else []) + ["Appendix B. Run log"]
+    title = {"compete": "Compete test", "solo": "Solo test", "live": "Live test"}[mode]
+    cover = f"""<section class='cover'><div class='band'><div class='kicker'>tcp-cc-lab · flow test report</div>
+<h1>{title}: {' vs '.join(ln(a) for a in algos)} across an emulated WAN</h1>
+<p class='lede'>{E(wtxt[0].upper() + wtxt[1:])}{'' if not br else f'; sender bit rate {br:g} Mbit/s per flow'}.</p></div>
 <div class='kpis'>{kpis}</div>
-<h2>Setup</h2><table>{''.join(f'<tr><th style="width:24%">{k}</th><td>{v}</td></tr>' for k, v in setup)}</table>
-<h2>Changes during the run</h2>{chg}
-<h2>Results</h2>{res_tbl}
-{''.join(f"<div class='fig'>{'<h2>Per second</h2>' + legend(algos) if i == 0 else ''}<h3>{t} <span class='sub'>{s}</span></h3>{c}</div>" for i, (t, s, c) in enumerate(figs))}
-{nodes_html}"""
+<div class='topo'>{topo_svg(inv, wan0)}</div>
+<table class='meta'><tr><th>Prepared by</th><td>{E(author)}</td></tr><tr><th>Date</th><td>{time.strftime('%B %-d, %Y', time.localtime(started))}</td></tr>
+<tr><th>Run</th><td class='mono'>{E(run['id'])} · {E(run['status'])} · {time.strftime('%H:%M:%S', time.localtime(started))}–{time.strftime('%H:%M:%S', time.localtime(finished))} ({finished - started:.0f} s)</td></tr>
+<tr><th>Lab</th><td>tcp-cc-lab {E(lab_version)}</td></tr><tr><th>Contents</th><td><ol class='contents' style='list-style:none;padding:0'>{''.join(f'<li>{E(t)}</li>' for t in toc)}</ol></td></tr></table></section>"""
+    body = f"""{cover}
+<h2>1. Summary</h2><div class='kpis'>{kpis}</div><div class='callout'>{E(summary)}</div>
+{lab_html}
+{method_html}
+<h2 class='page'>4. Results</h2>{res_tbl}
+{''.join(f"<div class='fig'>{'<h3>Per second</h3>' + legend(algos) if i == 0 else ''}<h3>{t} <span class='sub'>{s}</span></h3>{c}</div>" for i, (t, s, c) in enumerate(figs))}
+{nodes_html.replace('<h2>Nodes during the run</h2>', "<h2 class='page'>5. Nodes during the run</h2>")}
+{app_a}
+{app_b}"""
     return f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>Flow test report {E(run['id'])}</title><style>{CSS}</style></head><body>{body}</body></html>"
 
 

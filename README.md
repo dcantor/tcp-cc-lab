@@ -42,8 +42,14 @@ CPU now, CPU averaged over 60 s, and memory in use, plus a CPU % chart and a mem
 own window slider and a history slider under each chart. Untick a node to hide it.
 
 **PDF report**: when a compete, solo or live run has finished, the Flows card's "⤓ PDF report" button downloads a
-report of the run shown (`GET /api/runs/<id>/report.pdf`). It has the setup, every change made during the run, the
-results, per-second charts, and each node's CPU and memory during the run.
+report of the run shown (`GET /api/runs/<id>/report.pdf`). It opens with a title page, then:
+1. a summary;
+2. the lab setup;
+3. how that run was tested, with every change made during it;
+4. the results with per-second charts;
+5. each node's CPU and memory during the run.
+
+Appendix A has every device's configuration, collected live; appendix B has the run's log.
 
 **Topology**: click any device (or a node in that table) to open `/config/<node>` in a new tab, with its configuration
 collected live:

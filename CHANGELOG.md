@@ -5,19 +5,31 @@ All notable changes to this lab are documented here ([Keep a Changelog](https://
 ## [0.8.0] - 2026-10-23
 
 ### Added
-- "⤓ PDF report" button in the Flows card. Once the run shown has finished (compete, solo or live), it downloads a PDF
-  report of that run (`GET /api/runs/<id>/report.pdf`, built once and kept as `runs/<id>.report.pdf`). The report
-  contains:
-  - throughput per algorithm;
-  - the setup: mode, flows, the iperf3 command, the sender bit rate, the WAN at the start, host MTU and VM size;
-  - every change made during the run, with its time;
-  - the results table;
-  - per-second charts of throughput, RTT, retransmits and (live) the bottleneck queue, with the changes marked;
-  - each node's CPU and memory during the run, as a table and charts.
+- "⤓ PDF report" button in the Flows card. Once the run shown has finished (compete, solo or live), it downloads a
+  report of that run (`GET /api/runs/<id>/report.pdf`, built once per lab version and kept in `runs/`). It is laid out
+  as a document:
+  - **Title page:** the test and algorithms, the WAN, throughput per algorithm, a topology diagram, prepared by, date,
+    run, lab version, contents.
+  - **1. Summary:** a paragraph written from the run's own record.
+  - **2. The lab:** topology, every node (role, algorithm, addresses, vCPU, RAM), how the WAN emulator builds the delay,
+    loss and bottleneck, and the hosts' key TCP settings. It also states that all six hosts' 121 sysctls were checked
+    identical apart from the algorithm.
+  - **3. How this run was tested:** the method for that mode (including the live bit-rate restarts), how each figure is
+    measured, the run parameters, and every change with its time.
+  - **4. Results:** the table, plus per-second throughput, RTT, retransmits and (live) bottleneck queue, with the changes
+    marked.
+  - **5. Nodes during the run:** CPU and memory per node.
+  - **Appendix A. Device configurations:** each device's configuration, collected live over SSH when the report is made.
+    The full sysctl list is printed once, since the hosts are verified identical. VyOS password hashes are redacted.
+  - **Appendix B. Run log:** the run's events, with changes in words.
 
   It is built as HTML with SVG charts in `webapp/report.py` and printed by headless Chrome from a `file://` page.
 - Each flow run now keeps the nodes' CPU and memory samples for its span (`node_stats` in the run record), so its
   report still has them after a portal restart.
+
+### Changed
+- The device pages: the iperf3 section lists only the iperf3 processes, and a router's version and system details are
+  one section.
 
 ### Fixed
 - The WAN card and wanem's script still said wanem has 512 MB of RAM (it has had 1 GB since 0.7.0).

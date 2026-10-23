@@ -195,7 +195,7 @@ HOST_SECTIONS = [
     ("Congestion control", "echo \"in use:    $(sysctl -n net.ipv4.tcp_congestion_control)\"; echo \"available: $(sysctl -n net.ipv4.tcp_available_congestion_control)\"; echo \"default qdisc: $(sysctl -n net.core.default_qdisc)\""),
     ("TCP and socket settings (sysctl net.ipv4.tcp_* and net.core.*)", "sysctl -a 2>/dev/null | grep -E '^net\\.(ipv4\\.tcp_|core\\.)' | grep -v '_entries'"),
     ("Settings applied at boot (/etc/sysctl.d)", "for f in /etc/sysctl.d/*.conf; do echo \"# $f\"; cat \"$f\"; echo; done"),
-    ("iperf3", "iperf3 --version | head -1; echo; ps -o pid,args | grep '[i]perf3'"),
+    ("iperf3", "iperf3 --version | head -1; echo; ps -o pid,args | awk '$2 == \"iperf3\"'"),
 ]
 NODE_SECTIONS = {
     "host": HOST_SECTIONS,
@@ -211,8 +211,7 @@ NODE_SECTIONS = {
         ("Configuration (show configuration commands)", "/opt/vyatta/bin/vyatta-op-cmd-wrapper show configuration commands"),
         ("Interfaces", "/opt/vyatta/bin/vyatta-op-cmd-wrapper show interfaces"),
         ("Routes", "/opt/vyatta/bin/vyatta-op-cmd-wrapper show ip route"),
-        ("Version", "/opt/vyatta/bin/vyatta-op-cmd-wrapper show version | head -12"),
-        ("System", "echo \"$(nproc) vCPU\"; free -m"),
+        ("System and version", "echo \"$(nproc) vCPU\"; free -m; echo; /opt/vyatta/bin/vyatta-op-cmd-wrapper show version | head -8"),
     ],
 }
 CONFIG_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -236,8 +235,9 @@ pre {{ background:var(--code); border:1px solid var(--line); border-radius:6px; 
 <main><nav>{nav}</nav>{body}</main></body></html>"""
 
 
-def config_html(name):
-    n = C.node(name); role = n["role"]
+def node_sections(name):
+    """[(title, text)] for one node, collected live over SSH in one go (VyOS password hashes redacted)."""
+    role = C.node(name)["role"]
     script = "".join(f"echo '@@{i}'; {{ {cmd} ; }} 2>&1; " for i, (_, cmd) in enumerate(NODE_SECTIONS[role]))
     try: rc, out = C.run(name, script, timeout=30)
     except Exception as e: rc, out = 255, f"@@0\n{e}"   # noqa: BLE001
@@ -246,12 +246,19 @@ def config_html(name):
     for l in out.splitlines():
         if l.startswith("@@") and l[2:].isdigit(): cur = int(l[2:]); parts[cur] = []; continue
         if cur is not None: parts[cur].append(l)
-    body = "".join(f'<section id="s{i}"><h2>{escape(t)}</h2><pre>{escape(chr(10).join(parts.get(i, [])).rstrip()) or "<span class=bad>no output (is the node running?)</span>"}</pre></section>'
-                   for i, (t, _) in enumerate(NODE_SECTIONS[role]))
-    nav = " ".join(f'<a href="#s{i}">{escape(t.split(" (")[0])}</a>' for i, (t, _) in enumerate(NODE_SECTIONS[role]))
-    desc = {"host": f"host, {({'cubic': 'CUBIC', 'bbr': 'BBR', 'reno': 'Reno'}).get(n['cc'], n['cc'])}, data {n['ip']}",
-            "wanem": "WAN emulator (Alpine, netem + tbf on a bridge)", "router": f"router (VyOS), data {n['ip']}"}[role]
-    return CONFIG_PAGE.format(name=escape(name), role=escape(desc), mgmt=escape(f"{n['user']}@{n['mgmt_ip']}"), when=time.strftime("%Y-%m-%d %H:%M:%S"), nav=nav, body=body)
+    return [(t, "\n".join(parts.get(i, [])).rstrip()) for i, (t, _) in enumerate(NODE_SECTIONS[role])]
+
+
+def node_desc(n):
+    return {"host": f"host, {({'cubic': 'CUBIC', 'bbr': 'BBR', 'reno': 'Reno'}).get(n['cc'], n['cc'])}, data {n['ip']}",
+            "wanem": "WAN emulator (Alpine, netem + tbf on a bridge)", "router": f"router (VyOS), data {n['ip']}"}[n["role"]]
+
+
+def config_html(name):
+    n = C.node(name); secs = node_sections(name)
+    body = "".join(f'<section id="s{i}"><h2>{escape(t)}</h2><pre>{escape(txt) or "<span class=bad>no output (is the node running?)</span>"}</pre></section>' for i, (t, txt) in enumerate(secs))
+    nav = " ".join(f'<a href="#s{i}">{escape(t.split(" (")[0])}</a>' for i, (t, _) in enumerate(secs))
+    return CONFIG_PAGE.format(name=escape(name), role=escape(node_desc(n)), mgmt=escape(f"{n['user']}@{n['mgmt_ip']}"), when=time.strftime("%Y-%m-%d %H:%M:%S"), nav=nav, body=body)
 
 
 # ---- API -------------------------------------------------------------------------------------------------------------
@@ -483,13 +490,15 @@ def run_report(run_id: str):
     if not d: raise HTTPException(404, "no such run")
     if d["mode"] not in LIVE_MODES: raise HTTPException(422, "reports are for compete, solo and live runs")
     if d["status"] in ("queued", "running"): raise HTTPException(409, "the run has not finished yet")
-    out = RUNS_DIR / f"{run_id}.report.pdf"
+    out = RUNS_DIR / f"{run_id}.report-{VERSION}.pdf"   # rebuilt when the report format changes
     with _report_lock:
         if not out.exists():
             a = _stats.get("a-cubic") or {}; last = a["samples"][-1] if a.get("samples") else None
             info = (f"Alpine Linux VMs, {a.get('vcpus') or '?'} vCPU and {round(last[3] / 1000, 1) if last else '?'} GB usable RAM each; fq on eth1; "
                     "the same sysctls on every host apart from the congestion control")
-            try: pdfreport.build_pdf(pdfreport.build_html(d, VERSION, {n: list(v["samples"]) for n, v in _stats.items()}, info), out)
+            inv = C.inventory(); configs = C._parallel(node_sections, [n["name"] for n in inv["nodes"]])   # appendix A: every device, live
+            try: pdfreport.build_pdf(pdfreport.build_html(d, VERSION, {n: list(v["samples"]) for n, v in _stats.items()}, info,
+                                                          {k: v for k, v in inv.items() if k != "by_name"}, configs), out)
             except Exception as e: raise HTTPException(500, f"report failed: {str(e)[:300]}")   # noqa: BLE001
     return FileResponse(out, media_type="application/pdf", filename=f"tcp-cc-lab-{d['mode']}-{run_id}.pdf")
 
