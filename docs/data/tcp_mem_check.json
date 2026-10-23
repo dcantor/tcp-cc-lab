@@ -10,8 +10,8 @@
  "rtt_ms": 150,
  "rate_mbit": 500,
  "bdp_mb": 9.375,
- "duration": 20,
- "mbps": 434.98,
- "sender_pressures": 95,
+ "duration": 30,
+ "mbps": 437.82,
+ "sender_pressures": 145,
  "receiver_pressures": 0
 }

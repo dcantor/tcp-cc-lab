@@ -27,6 +27,7 @@ Libvirt/KVM (QEMU) like the other labs. MTU: hosts 1500 or 9000 (switchable), ro
 ./lab.sh wan apply 100 100 0 1          # RTT 100 ms, 100 Mbit/s, 0 % loss, 1 x BDP buffer
 ./lab.sh flows compete --duration 30    # all three at once through the bottleneck
 ./lab.sh flows sweep                    # each algorithm alone at RTT 0/10/30/60/100/150 ms, bottleneck 500 Mbit/s
+python3 tools/bbr_experiment.py --trials 1 --duration 30 --bitrate 500M   # the controlled BBR comparison (~21 min)
 ./lab.sh test        # Robot suites → results/latest
 ```
 

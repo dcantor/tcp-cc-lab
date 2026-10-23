@@ -19,8 +19,18 @@ All notable changes to this lab are documented here ([Keep a Changelog](https://
 - A tcp_mem check: the hosts' 217 MB of RAM sizes `tcp_mem` at 13.2 MB pressure / 19.8 MB high; one CUBIC flow at
   500 Mbit/s x 150 ms put its sender into memory pressure 95 times in 20 s (documented, not changed).
 
+- `tools/bbr_experiment.py` and walkthrough K (section 17): a controlled single-flow comparison of CUBIC, BBR and Reno
+  at 500 Mbit/s (RTT 10 / 100 / 150 ms x clean, shallow buffer, 0.01 % and 0.1 % random loss), one run per profile,
+  `iperf3 -p 5201 -t 30 -b 500M`, random order per profile, host TCP settings fingerprinted before and after
+  (identical apart from the algorithm, unchanged). Hypotheses stated up front; results, cost table, threats to validity.
+  Findings 13-14: BBR 3-14x CUBIC at 0.01 % loss (gap grows with RTT), no faster on a clean path.
+- iperf3 `-b`: `cclab.py compete|solo|sweep --bitrate` (sweep defaults to 500M), Robot `Run Flows ... bitrate=`.
+
 ### Changed
 - The walkthrough's cover is a white-paper title page (author, date, abstract).
+- Walkthrough J and `05_rtt_series` use one TCP flow with `iperf3 -t 30 -b 500M` per point (were 20 / 15 s, no -b).
+- `lab.sh mtu set` deletes and re-adds fq on eth1, so fq's quantum follows the MTU (a host switched back from 9000
+  kept an 18028-byte quantum with `tc qdisc replace`).
 
 ## [0.3.1] - 2026-10-23
 

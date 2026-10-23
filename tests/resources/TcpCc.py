@@ -46,9 +46,10 @@ def ping_loss(src, dst, count=200, interval=0.05):
     raise AssertionError(f"no ping summary: {out[-200:]}")
 
 
-def run_flows(mode, duration=20, direction="a2b", algos="cubic,bbr,reno", stagger=0):
-    """compete | solo -> the cclab summary (flows: [{cc, cc_reported, mbps, retransmits, rtt_ms {mean..}, error}], total_mbps, ...)."""
-    return C.flows(mode, int(duration), direction, [a.strip() for a in algos.split(",")], float(stagger))
+def run_flows(mode, duration=20, direction="a2b", algos="cubic,bbr,reno", stagger=0, bitrate=None):
+    """compete | solo -> the cclab summary (flows: [{cc, cc_reported, mbps, retransmits, rtt_ms {mean..}, error}], total_mbps, ...).
+    bitrate: iperf3 -b per flow (e.g. 500M); None = unlimited."""
+    return C.flows(mode, int(duration), direction, [a.strip() for a in algos.split(",")], float(stagger), bitrate or None)
 
 
 def flow_of(result, cc):

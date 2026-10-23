@@ -396,7 +396,7 @@ cmd_mtu() {   # show | set 1500|9000 — the hosts' eth1 MTU (all six); the rout
       done ;;
     set)
       m="${1:?usage: lab.sh mtu set ${HOST_MTUS[*]}}"; [[ " ${HOST_MTUS[*]} " == *" $m "* ]] || die "MTU must be one of: ${HOST_MTUS[*]}"
-      for h in "${HOSTS[@]}"; do ( S "$h" "doas sh -c 'echo $m > /etc/tcpcc-mtu && ip link set eth1 mtu $m && ip route flush cache' && echo \"$h eth1 mtu \$(cat /sys/class/net/eth1/mtu)\"" 2>&1 || echo "$h FAILED" ) & done; wait ;;
+      for h in "${HOSTS[@]}"; do ( S "$h" "doas sh -c 'echo $m > /etc/tcpcc-mtu && ip link set eth1 mtu $m && { tc qdisc del dev eth1 root 2>/dev/null; tc qdisc add dev eth1 root fq; } && ip route flush cache' && echo \"$h eth1 mtu \$(cat /sys/class/net/eth1/mtu)\"" 2>&1 || echo "$h FAILED" ) & done; wait ;;
     *) die "usage: lab.sh mtu show | set ${HOST_MTUS[*]}" ;;
   esac
 }

@@ -5,7 +5,7 @@ congestion control algorithm (CUBIC / BBR / Reno), and the WAN emulator's settin
     cclab.py compete [--duration 30] [--direction a2b|b2a] [--algos cubic,bbr,reno] [--stagger 0]
                      all flows at once through the shared bottleneck: who gets what
     cclab.py solo    [--duration 20] [--direction a2b|b2a] [--algos ...]   one algorithm at a time, the link to itself
-    cclab.py sweep   [--rtts 0,10,30,60,100,150] [--rate 500] [--duration 20] [--direction a2b|b2a] [--algos ...]
+    cclab.py sweep   [--rtts 0,10,30,60,100,150] [--rate 500] [--duration 20] [--bitrate 500M] [--direction a2b|b2a] [--algos ...]
                      each algorithm alone at each RTT, the bottleneck at --rate; the WAN goes back to its settings after
     cclab.py rtt     [--count 10]      ping RTT a-cubic -> b-cubic (the emulated RTT + the VMs' own ~1 ms)
     cclab.py wan     [--rtt MS] [--rate MBIT] [--loss PCT] [--buffer BDP] [--reset]   show / change the WAN emulator
@@ -143,15 +143,15 @@ def senders(direction, algos):
 class Flow(threading.Thread):
     """One iperf3 client on a sender host, to its peer's server, --json-stream parsed as it arrives."""
 
-    def __init__(self, sender, duration, t0, delay=0.0):
+    def __init__(self, sender, duration, t0, delay=0.0, bitrate=None):
         super().__init__(daemon=True)
-        self.h, self.duration, self.t0, self.delay = sender, duration, t0, delay
+        self.h, self.duration, self.t0, self.delay, self.bitrate = sender, duration, t0, delay, bitrate
         self.samples, self.end, self.error, self.actual_cc, self.mss = [], None, None, None, None
 
     def run(self):
         time.sleep(self.delay)
         peer = node(self.h["peer"])["ip"]
-        cmd = f"iperf3 -c {peer} -p 5201 -t {self.duration} -i 1 --json-stream -f m"
+        cmd = f"iperf3 -c {peer} -p 5201 -t {self.duration} -i 1 --json-stream -f m" + (f" -b {self.bitrate}" if self.bitrate else "")
         p = subprocess.Popen([*SSH, f"lab@{self.h['mgmt_ip']}", cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             for l in p.stdout:
@@ -179,7 +179,7 @@ class Flow(threading.Thread):
         e = self.end or {}; snt = (e.get("sum_sent") or {}); rcv = (e.get("sum_received") or {})
         st = ((e.get("streams") or [{}])[0].get("sender") or {})
         rtts = [s["rtt_ms"] for s in self.samples if s["rtt_ms"]]
-        return {"host": self.h["name"], "cc": self.h["cc"], "cc_reported": (e.get("sender_tcp_congestion") or self.actual_cc),
+        return {"host": self.h["name"], "cc": self.h["cc"], "bitrate": self.bitrate, "cc_reported": (e.get("sender_tcp_congestion") or self.actual_cc),
                 "mss": self.mss, "mbps": round(rcv.get("bits_per_second", 0) / 1e6, 2), "sent_mbps": round(snt.get("bits_per_second", 0) / 1e6, 2),
                 "retransmits": snt.get("retransmits", 0), "rtt_ms": {"mean": round(st.get("mean_rtt", 0) / 1000, 2), "min": round(st.get("min_rtt", 0) / 1000, 2),
                 "max": round(st.get("max_rtt", 0) / 1000, 2), "p50_samples": sorted(rtts)[len(rtts) // 2] if rtts else None},
@@ -191,7 +191,7 @@ def jain(xs):
     return round(sum(xs) ** 2 / (len(xs) * sum(x * x for x in xs)), 3) if xs and any(xs) else None
 
 
-def flows(mode, duration, direction, algos, stagger=0.0):
+def flows(mode, duration, direction, algos, stagger=0.0, bitrate=None):
     wan = wan_stats(); hs = senders(direction, algos); mtu = mtu_state()
     if not hs: raise SystemExit("no senders for those algorithms")
     log(f"{mode}: {', '.join(h['name'] + ' -> ' + h['peer'] for h in hs)}; WAN RTT {wan['settings']['rtt_ms']} ms, "
@@ -199,16 +199,16 @@ def flows(mode, duration, direction, algos, stagger=0.0):
     before = wan_stats()[direction]; results = []
     t0 = time.time()
     if mode == "compete":
-        fs = [Flow(h, duration, t0, i * stagger) for i, h in enumerate(hs)]
+        fs = [Flow(h, duration, t0, i * stagger, bitrate) for i, h in enumerate(hs)]
         for f in fs: f.start()
         for f in fs: f.join(duration + stagger * len(fs) + 60)
         results = [f.summary() for f in fs]
     else:
         for h in hs:
-            log(f"--- {h['cc']} alone ({h['name']})"); f = Flow(h, duration, t0); f.start(); f.join(duration + 60); results.append(f.summary()); time.sleep(2)
+            log(f"--- {h['cc']} alone ({h['name']})"); f = Flow(h, duration, t0, bitrate=bitrate); f.start(); f.join(duration + 60); results.append(f.summary()); time.sleep(2)
     after = wan_stats()
     bott = {k: after[direction][k] - before[k] for k in ("bytes", "packets", "drops")}
-    out = {"mode": mode, "direction": direction, "duration": duration, "stagger": stagger, "wan": wan["settings"], "host_mtu": mtu["host_mtu"], "flows": results,
+    out = {"mode": mode, "direction": direction, "duration": duration, "stagger": stagger, "bitrate": bitrate, "wan": wan["settings"], "host_mtu": mtu["host_mtu"], "flows": results,
            "total_mbps": round(sum(r["mbps"] for r in results), 2) if mode == "compete" else None,
            "jain_fairness": jain([r["mbps"] for r in results]) if mode == "compete" else None,
            "bottleneck": {**bott, "wan_after": after["settings"]},
@@ -222,12 +222,12 @@ def flows(mode, duration, direction, algos, stagger=0.0):
 SWEEP_RTTS = (0, 10, 30, 60, 100, 150)
 
 
-def sweep(rtts=SWEEP_RTTS, rate_mbit=500, duration=20, direction="a2b", algos=ALGOS):
+def sweep(rtts=SWEEP_RTTS, rate_mbit=500, duration=20, direction="a2b", algos=ALGOS, bitrate="500M"):
     """For each RTT: set the WAN (RTT, rate; loss and buffer as they are), ping it, then run each algorithm alone.
     The WAN's previous settings are put back at the end, also on error or Ctrl-C."""
     hs = senders(direction, list(algos)); prev = wan_stats()["settings"]; mtu = mtu_state()
     if not hs: raise SystemExit("no senders for those algorithms")
-    log(f"sweep: RTT {', '.join(f'{r:g}' for r in rtts)} ms at {rate_mbit:g} Mbit/s; {', '.join(h['cc'] for h in hs)} alone, {duration} s each; host MTU {mtu['host_mtu'] or 'mixed'}")
+    log(f"sweep: RTT {', '.join(f'{r:g}' for r in rtts)} ms at {rate_mbit:g} Mbit/s, iperf3 -b {bitrate or 'unlimited'}; {', '.join(h['cc'] for h in hs)} alone, {duration} s each; host MTU {mtu['host_mtu'] or 'mixed'}")
     points = []
     try:
         for rtt in rtts:
@@ -237,7 +237,7 @@ def sweep(rtts=SWEEP_RTTS, rate_mbit=500, duration=20, direction="a2b", algos=AL
             res = []
             for h in hs:
                 before = wan_stats()[direction]; t0 = time.time()
-                f = Flow(h, duration, t0); f.start(); f.join(duration + 60)
+                f = Flow(h, duration, t0, bitrate=bitrate); f.start(); f.join(duration + 60)
                 after = wan_stats()[direction]; r = f.summary()
                 r["drops"] = after["drops"] - before["drops"]; r["samples"] = [{k: x[k] for k in ("t", "mbps", "rtt_ms", "cwnd", "retr")} for x in f.samples]
                 res.append(r)
@@ -247,7 +247,7 @@ def sweep(rtts=SWEEP_RTTS, rate_mbit=500, duration=20, direction="a2b", algos=AL
     finally:
         wan_apply(prev["rtt_ms"], prev["rate_mbit"], prev["loss_pct"], prev["buffer_bdp"])
         log(f"WAN back to RTT {prev['rtt_ms']} ms, {prev['rate_mbit']} Mbit/s")
-    return {"mode": "sweep", "direction": direction, "duration": duration, "rate_mbit": rate_mbit, "rtts": list(rtts),
+    return {"mode": "sweep", "direction": direction, "duration": duration, "rate_mbit": rate_mbit, "bitrate": bitrate, "rtts": list(rtts),
             "algos": [h["cc"] for h in hs], "host_mtu": mtu["host_mtu"], "wan_restored": prev, "points": points}
 
 
@@ -257,9 +257,11 @@ def main():
     for m, d in (("compete", 30), ("solo", 20)):
         p = sp.add_parser(m); p.add_argument("--duration", type=int, default=d); p.add_argument("--direction", choices=("a2b", "b2a"), default="a2b")
         p.add_argument("--algos", default=",".join(ALGOS)); p.add_argument("--stagger", type=float, default=0.0)
+        p.add_argument("--bitrate", default=None, help="iperf3 -b per flow, e.g. 500M (default: unlimited)")
     p = sp.add_parser("sweep"); p.add_argument("--rtts", default=",".join(map(str, SWEEP_RTTS))); p.add_argument("--rate", type=float, default=500)
     p.add_argument("--duration", type=int, default=20); p.add_argument("--direction", choices=("a2b", "b2a"), default="a2b"); p.add_argument("--algos", default=",".join(ALGOS))
     p.add_argument("--samples", action="store_true", help="keep the per-second samples in the JSON")
+    p.add_argument("--bitrate", default="500M", help="iperf3 -b (default 500M; 0 = unlimited)")
     p = sp.add_parser("rtt"); p.add_argument("--count", type=int, default=10); p.add_argument("--src", default="a-cubic"); p.add_argument("--dst", default="b-cubic")
     p = sp.add_parser("wan"); p.add_argument("--rtt", type=float); p.add_argument("--rate", type=float); p.add_argument("--loss", type=float)
     p.add_argument("--buffer", type=float); p.add_argument("--reset", action="store_true")
@@ -270,7 +272,7 @@ def main():
         bad = [x for x in algos if x not in ALGOS]
         if bad: ap.error(f"unknown algorithm(s): {', '.join(bad)}")
         if not 5 <= a.duration <= 300: ap.error("--duration: 5 .. 300 s")
-        res = flows(a.cmd, a.duration, a.direction, algos, a.stagger)
+        res = flows(a.cmd, a.duration, a.direction, algos, a.stagger, a.bitrate)
         res.pop("samples", None) if a.cmd == "solo" else None
     elif a.cmd == "sweep":
         algos = [x.strip() for x in a.algos.split(",") if x.strip()]
@@ -280,7 +282,7 @@ def main():
         if not rtts or not all(LIMITS["rtt_ms"][0] <= r <= LIMITS["rtt_ms"][1] for r in rtts): ap.error("--rtts: 0 .. 300 ms")
         if not LIMITS["rate_mbit"][0] <= a.rate <= LIMITS["rate_mbit"][1]: ap.error("--rate: 1 .. 1000 Mbit/s")
         if not 5 <= a.duration <= 300: ap.error("--duration: 5 .. 300 s")
-        res = sweep(rtts, a.rate, a.duration, a.direction, algos)
+        res = sweep(rtts, a.rate, a.duration, a.direction, algos, None if a.bitrate in ("0", "") else a.bitrate)
         if not a.samples:
             for pt in res["points"]:
                 for r in pt["flows"]: r.pop("samples", None)

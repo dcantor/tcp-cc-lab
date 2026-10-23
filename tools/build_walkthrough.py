@@ -223,7 +223,7 @@ def collect_sweep500(C=None, mtus=(1500, 9000)):
     try:
         for mtu in mtus:
             C.mtu_set(mtu)
-            put("sweep500" if mtu == 1500 else f"sweep500_{mtu}", C.sweep(C.SWEEP_RTTS, 500, 20, "a2b", C.ALGOS))
+            put("sweep500" if mtu == 1500 else f"sweep500_{mtu}", C.sweep(C.SWEEP_RTTS, 500, 30, "a2b", C.ALGOS, "500M"))
     finally:
         C.mtu_set(1500); C.wan_reset()
 
@@ -246,7 +246,7 @@ def collect_host_tcp(C=None):
     put("host_tcp", out)
 
 
-def collect_tcp_mem_check(C=None, rtt=150, rate=500, duration=20):
+def collect_tcp_mem_check(C=None, rtt=150, rate=500, duration=30):
     """Does tcp_mem (sized from the hosts' small RAM) bite at 500 Mbit/s on a long path? One CUBIC flow alone, counting
     TcpExt TCPMemoryPressures on the sender and the receiver around it."""
     if C is None:
@@ -260,7 +260,7 @@ def collect_tcp_mem_check(C=None, rtt=150, rate=500, duration=20):
     try:
         C.mtu_set(1500); wan = C.wan_apply(rtt, rate)["settings"]
         b = (pressures(snd["name"]), pressures(snd["peer"]))
-        f = C.Flow(snd, duration, time.time()); f.start(); f.join(duration + 60)
+        f = C.Flow(snd, duration, time.time(), bitrate="500M"); f.start(); f.join(duration + 60)
         a = (pressures(snd["name"]), pressures(snd["peer"]))
     finally:
         C.wan_reset()
@@ -437,7 +437,7 @@ def chart_s500(field):
             pts.append((p["rtt_ms"], y))
         series.append((cc, NAME[cc], pts))
     if field == "mbps":
-        return svg_lines(series, "Mbit/s (whole 20 s run)", xlabel="emulated RTT, ms", xticks=rtts, dots=True, ymax=nice_max(d["rate_mbit"] * 1.05),
+        return svg_lines(series, "Mbit/s (whole 30 s run)", xlabel="emulated RTT, ms", xticks=rtts, dots=True, ymax=nice_max(d["rate_mbit"] * 1.05),
                          hline=(d["rate_mbit"], f"bottleneck {d['rate_mbit']:g} Mbit/s"))
     return svg_lines(series, "queueing delay added, ms", xlabel="emulated RTT, ms", xticks=rtts, dots=True)
 
@@ -455,7 +455,7 @@ def chart_s500_mtu():
     for cc in a["algos"]:
         for d, tag, dash in ((b, "9000", None), (a, "1500", "5 4")):
             series.append((cc, f"{NAME[cc]} {tag}", [(p["rtt_ms"], next(f for f in p["flows"] if f["cc"] == cc)["mbps"]) for p in d["points"]], dash))
-    return svg_lines(series, "Mbit/s (whole 20 s run)", xlabel="emulated RTT, ms", xticks=rtts, dots=True, ymax=nice_max(a["rate_mbit"] * 1.05), h=260,
+    return svg_lines(series, "Mbit/s (whole 30 s run)", xlabel="emulated RTT, ms", xticks=rtts, dots=True, ymax=nice_max(a["rate_mbit"] * 1.05), h=260,
                      hline=(a["rate_mbit"], f"bottleneck {a['rate_mbit']:g} Mbit/s"))
 
 
@@ -480,6 +480,181 @@ CHARTS["s500_mtu"] = chart_s500_mtu
 CHARTS["s500_mbps"] = lambda: chart_s500("mbps")
 CHARTS["s500_queue"] = lambda: chart_s500("queue")
 CHARTS["s500_ramp"] = chart_s500_ramp
+
+# ---- walkthrough K: the controlled BBR experiment (tools/bbr_experiment.py) -----------------------------------------
+def _betacf(a, b, x):
+    qab, qap, qam, c, d = a + b, a + 1, a - 1, 1.0, 1 - (a + b) * x / (a + 1)
+    d = 1 / (d if abs(d) > 1e-300 else 1e-300); h = d
+    for m in range(1, 300):
+        m2 = 2 * m
+        for aa in (m * (b - m) * x / ((qam + m2) * (a + m2)), -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))):
+            d = 1 + aa * d; d = 1 / (d if abs(d) > 1e-300 else 1e-300)
+            c = 1 + aa / c if abs(1 + aa / c) > 1e-300 else 1e-300
+            h *= d * c
+            if aa < 0 and abs(d * c - 1) < 1e-12: return h
+    return h
+
+
+def _ibeta(a, b, x):
+    if x <= 0: return 0.0
+    if x >= 1: return 1.0
+    bt = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log(1 - x))
+    return bt * _betacf(a, b, x) / a if x < (a + 1) / (a + b + 2) else 1 - bt * _betacf(b, a, 1 - x) / b
+
+
+def t_sf2(t, df):
+    """Two-sided p-value of Student's t."""
+    return _ibeta(df / 2, 0.5, df / (df + t * t))
+
+
+def t_crit(df, alpha=0.05):
+    lo, hi = 0.0, 100.0
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        if t_sf2(mid, df) > alpha: lo = mid
+        else: hi = mid
+    return (lo + hi) / 2
+
+
+def describe(xs):
+    n = len(xs); m = sum(xs) / n
+    if n == 1: return {"n": 1, "mean": m, "sd": 0.0, "ci": 0.0, "min": m, "max": m}
+    sd = math.sqrt(sum((x - m) ** 2 for x in xs) / (n - 1)) if n > 1 else 0.0
+    return {"n": n, "mean": m, "sd": sd, "ci": t_crit(n - 1) * sd / math.sqrt(n) if n > 1 else 0.0, "min": min(xs), "max": max(xs)}
+
+
+def welch(a, b):
+    da, db = describe(a), describe(b)
+    va, vb = da["sd"] ** 2 / da["n"], db["sd"] ** 2 / db["n"]
+    if va + vb == 0: return {"t": math.inf, "df": da["n"] + db["n"] - 2, "p": 0.0 if da["mean"] != db["mean"] else 1.0}
+    t = (da["mean"] - db["mean"]) / math.sqrt(va + vb)
+    df = (va + vb) ** 2 / ((va ** 2 / (da["n"] - 1) if da["n"] > 1 else 0) + (vb ** 2 / (db["n"] - 1) if db["n"] > 1 else 0) or 1e-12)
+    return {"t": t, "df": df, "p": t_sf2(t, df)}
+
+
+def k_analysis():
+    d = j("bbr_experiment"); des = d["design"]; cells = []
+    for rtt in des["rtts"]:
+        for c in des["conditions"]:
+            cell = d["cells"].get(f"{c['key']}@{rtt}")
+            if not cell: continue
+            by = {cc: [r for r in cell["runs"] if r["cc"] == cc] for cc in des["algos"]}
+            st = {cc: describe([r["mbps"] for r in rs]) for cc, rs in by.items()}
+            rt = {cc: describe([r["retransmits"] for r in rs]) for cc, rs in by.items()}
+            q = {cc: describe([max(0.0, r["rtt_mean_ms"] - cell["ping"]["min_ms"]) for r in rs]) for cc, rs in by.items()}
+            tests = {o: (welch([r["mbps"] for r in by["bbr"]], [r["mbps"] for r in by[o]]) if len(by["bbr"]) > 1 else {"t": 0, "df": 0, "p": 1.0}) for o in ("cubic", "reno")}
+            wins = {o: sum(b["mbps"] > x["mbps"] for b, x in zip(sorted(by["bbr"], key=lambda r: r["trial"]), sorted(by[o], key=lambda r: r["trial"]))) for o in ("cubic", "reno")}
+            cells.append({"rtt": rtt, "cond": c["key"], "label": c["label"], "cell": cell, "stats": st, "retr": rt, "queue": q, "tests": tests, "wins": wins,
+                          "memp": {cc: sum(r["TCPMemoryPressures"] for r in rs) for cc, rs in by.items()},
+                          "errors": sum(1 for rs in by.values() for r in rs if r["error"] or r["cc_reported"] != r["cc"])})
+    # Holm-Bonferroni over every BBR comparison
+    ps = sorted(((c["tests"][o]["p"], i, o) for i, c in enumerate(cells) for o in ("cubic", "reno")))
+    m = len(ps); run = 0.0
+    for k, (p, i, o) in enumerate(ps):
+        run = max(run, min(1.0, (m - k) * p)); cells[i]["tests"][o]["p_holm"] = run
+    return d, cells
+
+
+def k_cond_label(key): return {"clean": "clean, 1 × BDP", "shallow": "shallow, ¼ × BDP", "loss001": "0.01 % loss", "loss01": "0.1 % loss"}[key]
+
+
+def chart_k(cond):
+    """Grouped bars: mean Mbit/s per algorithm at each RTT, whiskers = 95 % CI, dots = the individual runs."""
+    d, cells = k_analysis(); cs = [c for c in cells if c["cond"] == cond]
+    W, H, left, right, top, bot = 330, 210, 40, 8, 22, 30
+    ymax = d["design"]["rate_mbit"]; Y = lambda v: top + (1 - v / ymax) * (H - top - bot)
+    gw = (W - left - right) / max(1, len(cs)); bw = min(22, gw / 4.2)
+    s = [f"<svg viewBox='0 0 {W} {H}' width='100%' xmlns='http://www.w3.org/2000/svg' style='font-size:9.5px'>",
+         f"<text x='{left}' y='12' fill='#0b0b0b' font-weight='600'>{E(k_cond_label(cond))}</text>"]
+    for i in range(6):
+        v = ymax * i / 5; y = Y(v)
+        s.append(f"<line x1='{left}' y1='{y:.1f}' x2='{W - right}' y2='{y:.1f}' stroke='{'#d4d4d0' if i == 0 else '#ecebe8'}'/><text x='{left - 5}' y='{y + 3:.1f}' text-anchor='end' fill='#52514e'>{v:g}</text>")
+    for gi, c in enumerate(cs):
+        gx = left + gw * gi + gw / 2
+        s.append(f"<text x='{gx:.1f}' y='{H - bot + 13}' text-anchor='middle' fill='#52514e'>{c['rtt']} ms</text>")
+        for ai, cc in enumerate(d["design"]["algos"]):
+            st = c["stats"][cc]; x = gx + (ai - 1) * (bw + 3) - bw / 2
+            s.append(f"<rect x='{x:.1f}' y='{Y(st['mean']):.1f}' width='{bw:.1f}' height='{max(0.5, Y(0) - Y(st['mean'])):.1f}' rx='2' fill='{COL[cc]}' opacity='.85'/>")
+            cx = x + bw / 2
+            if st["n"] > 1: s.append(f"<line x1='{cx:.1f}' y1='{Y(max(0, st['mean'] - st['ci'])):.1f}' x2='{cx:.1f}' y2='{Y(min(ymax, st['mean'] + st['ci'])):.1f}' stroke='#0b0b0b' stroke-width='1.2'/>")
+            for r in c["cell"]["runs"]:
+                if r["cc"] == cc and st["n"] > 1: s.append(f"<circle cx='{cx:.1f}' cy='{Y(r['mbps']):.1f}' r='1.6' fill='#fff' stroke='#0b0b0b' stroke-width='.7'/>")
+    s.append(f"<text x='{(left + W - right) / 2:.0f}' y='{H - 4}' text-anchor='middle' fill='#52514e'>emulated RTT</text></svg>")
+    return "".join(s)
+
+
+def k_legend():
+    return ("<p class='small'>" + " ".join(f"<span class='sw' style='background:{COL[c]}'></span>{NAME[c]} &nbsp;" for c in ("cubic", "bbr", "reno"))
+            + " Goodput of each run, Mbit/s; the axis runs to the 500 Mbit/s bottleneck.</p>")
+
+
+def fmt_p(p):
+    return "&lt; 0.0001" if p < 1e-4 else f"{p:.4f}" if p < 0.01 else f"{p:.3f}"
+
+
+def table_k():
+    d, cells = k_analysis(); rows = []
+    if d["design"]["trials"] == 1: return table_k1(cells)
+    for c in cells:
+        st = c["stats"]; b = st["bbr"]["mean"]
+        def cmp(o):
+            t = c["tests"][o]; ratio = b / st[o]["mean"] if st[o]["mean"] else math.inf
+            sig = t["p_holm"] < 0.05
+            cls = " class='num'" if not sig else (" class='num' style='font-weight:600'")
+            return f"<td{cls}>{ratio:.2f}×</td><td class='num'>{fmt_p(t['p_holm'])}</td><td class='num'>{c['wins'][o]}/{len([r for r in c['cell']['runs'] if r['cc'] == 'bbr'])}</td>"
+        rows.append(f"<tr><td>{E(k_cond_label(c['cond']))}</td><td class='num'>{c['rtt']}</td>"
+                    + "".join(f"<td class='num'>{st[cc]['mean']:.0f} ± {st[cc]['ci']:.0f}</td>" for cc in ("cubic", "bbr", "reno")) + cmp("cubic") + cmp("reno") + "</tr>")
+    head = ("<table class='tight'><tr><th rowspan=2>path</th><th rowspan=2 class='num'>RTT</th><th colspan=3>Mbit/s, mean ± 95 % CI</th><th colspan=3>BBR vs CUBIC</th><th colspan=3>BBR vs Reno</th></tr>"
+            "<tr><th class='num'>CUBIC</th><th class='num'>BBR</th><th class='num'>Reno</th>" + "<th class='num'>ratio</th><th class='num'>p (Holm)</th><th class='num'>BBR won</th>" * 2 + "</tr>")
+    return head + "".join(rows) + "</table>"
+
+
+def table_k1(cells):
+    rows = []
+    for c in cells:
+        st = c["stats"]; b = st["bbr"]["mean"]
+        def ratio(o):
+            r = b / st[o]["mean"] if st[o]["mean"] else math.inf
+            return f"<td class='num'>{'<b>' if r > 1.05 else ''}{r:.2f}×{'</b>' if r > 1.05 else ''}</td>"
+        rows.append(f"<tr><td>{E(k_cond_label(c['cond']))}</td><td class='num'>{c['rtt']}</td>"
+                    + "".join(f"<td class='num'>{st[cc]['mean']:.1f}</td>" for cc in ("cubic", "bbr", "reno")) + ratio("cubic") + ratio("reno") + "</tr>")
+    return ("<table class='tight'><tr><th>path</th><th class='num'>RTT (ms)</th><th class='num'>CUBIC</th><th class='num'>BBR</th><th class='num'>Reno (Mbit/s)</th>"
+            "<th class='num'>BBR ÷ CUBIC</th><th class='num'>BBR ÷ Reno</th></tr>" + "".join(rows) + "</table>")
+
+
+def table_k_cost():
+    d, cells = k_analysis(); rows = []
+    for c in cells:
+        rows.append(f"<tr><td>{E(k_cond_label(c['cond']))}</td><td class='num'>{c['rtt']}</td>"
+                    + "".join(f"<td class='num'>{c['retr'][cc]['mean']:.0f}</td>" for cc in ("cubic", "bbr", "reno"))
+                    + "".join(f"<td class='num'>{c['queue'][cc]['mean']:.1f}</td>" for cc in ("cubic", "bbr", "reno"))
+                    + "".join(f"<td class='num'>{c['memp'][cc]}</td>" for cc in ("cubic", "bbr", "reno")) + "</tr>")
+    return ("<table class='tight'><tr><th rowspan=2>path</th><th rowspan=2 class='num'>RTT</th><th colspan=3>retransmits per run (mean)</th><th colspan=3>queueing delay added, ms (mean)</th><th colspan=3>TCP memory pressure events (sum)</th></tr>"
+            "<tr>" + "<th class='num'>CUBIC</th><th class='num'>BBR</th><th class='num'>Reno</th>" * 3 + "</tr>" + "".join(rows) + "</table>")
+
+
+def k_val(spec):
+    """{{k:cond@rtt.algo.mean}} and friends, for the prose."""
+    d, cells = k_analysis()
+    cid, rest = spec.split(".", 1); cond, rtt = cid.split("@")
+    c = next(c for c in cells if c["cond"] == cond and c["rtt"] == int(rtt))
+    parts = rest.split(".")
+    if parts[0] == "ratio": return f"{c['stats']['bbr']['mean'] / c['stats'][parts[1]]['mean']:.1f}"
+    v = c["stats"][parts[0]][parts[1]]
+    return f"{v:.0f}"
+
+
+def k_meta():
+    d, cells = k_analysis(); des = d["design"]
+    runs = sum(len(c["cell"]["runs"]) for c in cells); errs = sum(c["errors"] for c in cells)
+    fb = d["fingerprint_before"]; same = len({v["hash"] for v in fb.values()}) == 1
+    return {"runs": runs, "errors": errs, "cells": len(cells), "hours": d.get("elapsed_s", 0) / 3600, "minutes": round(d.get("elapsed_s", 0) / 60),
+            "bitrate": des.get("iperf_bitrate") or "unlimited ", "same": same, "unchanged": d.get("unchanged"),
+            "hash": next(iter(fb.values()))["hash"], "trials": des["trials"], "duration": des["duration_s"], "seed": des["seed"],
+            "sig": sum(1 for c in cells for o in ("cubic", "reno") if c["tests"][o]["p_holm"] < 0.05), "tests": 2 * len(cells)}
+
+
+CHARTS.update({f"k_{k}": (lambda k=k: chart_k(k)) for k in ("clean", "shallow", "loss001", "loss01")})
 
 
 def flows_table(r, with_total=True):
@@ -652,7 +827,7 @@ TABLES = {
     "solo_default": lambda: solo_table("solo_default"),
     "solo_bloat": lambda: solo_table("solo_bloat"),
     "solo_loss": lambda: solo_table("solo_loss"),
-    "sweep": table_sweep, "rttchange": table_rttchange, "mtu": table_mtu, "s500": table_s500, "host_tcp": table_host_tcp, "s500_mtu": table_s500_mtu,
+    "sweep": table_sweep, "rttchange": table_rttchange, "mtu": table_mtu, "s500": table_s500, "host_tcp": table_host_tcp, "s500_mtu": table_s500_mtu, "k": table_k, "k_cost": table_k_cost,
 }
 
 
@@ -695,6 +870,10 @@ def img(name):
 def build():
     s = SRC.read_text()
     passed, failed, res = results()
+    s = s.replace("{{section_k}}", (DOCS / "walkthrough.k.html").read_text())
+    kr = (DOCS / "walkthrough.k.results.html").read_text() if (DOCS / "walkthrough.k.results.html").exists() else "<!-- -->\n<!-- -->"
+    kres, kcost = (kr.split("<!-- cost -->") + [""])[:2]
+    s = s.replace("{{k_results}}", kres).replace("{{k_cost_text}}", kcost)
     s = s.replace("{{style}}", STYLE.read_text()).replace("{{results}}", res)
     s = s.replace("{{version}}", (LAB / "VERSION").read_text().strip()).replace("{{date}}", time.strftime("%B %-d, %Y"))
     s = s.replace("{{tests}}", str(passed + failed)).replace("{{passed}}", str(passed))
@@ -702,6 +881,13 @@ def build():
     s = re.sub(r"\{\{table:(\w+)\}\}", lambda m: TABLES[m.group(1)](), s)
     s = re.sub(r"\{\{img:([\w-]+)\}\}", lambda m: img(m.group(1)), s)
     s = s.replace("{{host_tcp_all}}", E(text_host_tcp_all())).replace("{{host_tcp_conf}}", E(host_tcp_conf())).replace("{{tcp_mem_note}}", tcp_mem_note())
+    if "{{k_" in s or "{{k:" in s:
+        km = k_meta()
+        s = re.sub(r"\{\{kmeta:(\w+)\}\}", lambda m: (f"{km[m.group(1)]:.1f}" if isinstance(km[m.group(1)], float) else str(km[m.group(1)])), s)
+        s = s.replace("{{k_legend}}", k_legend())
+        _, kc = k_analysis(); c10 = next(c for c in kc if c["cond"] == "clean" and c["rtt"] == 10)
+        s = s.replace("{{k_retr_clean10}}", f"{c10['retr']['bbr']['mean']:,.0f}").replace("{{k_retr_clean10_cubic}}", f"{c10['retr']['cubic']['mean']:,.0f}")
+        s = re.sub(r"\{\{k:([\w@.]+)\}\}", lambda m: k_val(m.group(1)), s)
     s = s.replace("{{json_qdisc}}", E(next(iter(j("host_tcp").values()))["qdisc"]))
     s = re.sub(r"\{\{text:(\w+)\}\}", lambda m: E((DATA / f"{m.group(1)}.txt").read_text().rstrip()), s)
     s = re.sub(r"\{\{json:(\w+)\}\}", lambda m: E(json.dumps(j(m.group(1)), indent=1)), s)

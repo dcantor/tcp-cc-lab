@@ -2,7 +2,7 @@
  "a-cubic": {
   "kernel": "6.12.81-0-virt",
   "mtu": 1500,
-  "qdisc": "qdisc fq 8001: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
+  "qdisc": "qdisc fq 8002: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
   "sysctl": {
    "net.core.default_qdisc": "fq",
    "net.core.netdev_max_backlog": "1000",
@@ -109,7 +109,7 @@
  "a-bbr": {
   "kernel": "6.12.81-0-virt",
   "mtu": 1500,
-  "qdisc": "qdisc fq 8001: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
+  "qdisc": "qdisc fq 8002: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
   "sysctl": {
    "net.core.default_qdisc": "fq",
    "net.core.netdev_max_backlog": "1000",
@@ -216,7 +216,7 @@
  "a-reno": {
   "kernel": "6.12.81-0-virt",
   "mtu": 1500,
-  "qdisc": "qdisc fq 8001: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
+  "qdisc": "qdisc fq 8002: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
   "sysctl": {
    "net.core.default_qdisc": "fq",
    "net.core.netdev_max_backlog": "1000",
@@ -323,7 +323,7 @@
  "b-cubic": {
   "kernel": "6.12.81-0-virt",
   "mtu": 1500,
-  "qdisc": "qdisc fq 8001: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
+  "qdisc": "qdisc fq 8002: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
   "sysctl": {
    "net.core.default_qdisc": "fq",
    "net.core.netdev_max_backlog": "1000",
@@ -430,7 +430,7 @@
  "b-bbr": {
   "kernel": "6.12.81-0-virt",
   "mtu": 1500,
-  "qdisc": "qdisc fq 8001: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
+  "qdisc": "qdisc fq 8002: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
   "sysctl": {
    "net.core.default_qdisc": "fq",
    "net.core.netdev_max_backlog": "1000",
@@ -537,7 +537,7 @@
  "b-reno": {
   "kernel": "6.12.81-0-virt",
   "mtu": 1500,
-  "qdisc": "qdisc fq 8001: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 18028b initial_quantum 90140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
+  "qdisc": "qdisc fq 8002: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop",
   "sysctl": {
    "net.core.default_qdisc": "fq",
    "net.core.netdev_max_backlog": "1000",

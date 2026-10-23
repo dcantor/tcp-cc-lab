@@ -1,6 +1,6 @@
 *** Settings ***
-Documentation     Each algorithm on its own, through a 500 Mbit/s bottleneck, at RTT 0, 10, 30, 60, 100 and 150 ms (15 s per
-...               point): the host really runs that algorithm, the path RTT follows the setting, and the flow uses the link.
+Documentation     Each algorithm on its own, through a 500 Mbit/s bottleneck, at RTT 0, 10, 30, 60, 100 and 150 ms (one TCP flow,
+...               iperf3 -t 30 -b 500M, per point): the host really runs that algorithm, the path RTT follows the setting, and the flow uses the link.
 ...               Up to 60 ms every algorithm should get >= 80 % of the rate; at 100 and 150 ms the slow-start ramp (several
 ...               seconds at 150 ms) and Reno's 1-MSS-per-RTT recovery after a loss make the floor 40 %.
 Resource          ../resources/common.resource
@@ -9,7 +9,8 @@ Suite Teardown    Wan Reset
 
 *** Variables ***
 ${RATE}           500
-${DURATION}       15
+${DURATION}       30
+${BITRATE}        500M
 @{RTTS}           0    10    30    60    100    150
 
 *** Test Cases ***
@@ -31,7 +32,7 @@ RTT Series
     [Arguments]    ${cc}
     FOR    ${rtt}    IN    @{RTTS}
         Wan Set    rtt_ms=${rtt}    rate_mbit=${RATE}
-        ${r}=    Run Flows    solo    ${DURATION}    a2b    ${cc}
+        ${r}=    Run Flows    solo    ${DURATION}    a2b    ${cc}    bitrate=${BITRATE}
         ${f}=    Flow Of    ${r}    ${cc}
         Should Be Equal    ${f}[cc_reported]    ${cc}    msg=a-${cc} reported ${f}[cc_reported]
         Should Be Equal As Numbers    ${r}[wan][rate_mbit]    ${RATE}

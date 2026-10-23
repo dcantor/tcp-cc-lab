@@ -1,0 +1,50 @@
+<h2 class="page">17. Walkthrough K — is BBR better on long fat networks?</h2>
+<p>The claim to test: <i>on paths with high bandwidth and high latency, BBR delivers more throughput than the loss-based algorithms.</i> This section tests it as a controlled comparison: one variable (the algorithm), everything else held identical and verified, and the path conditions under which the claim should and should not hold, chosen before the run.</p>
+
+<h3>Design</h3>
+<table>
+<tr><th>element</th><th>choice</th></tr>
+<tr><td>Question</td><td>Does the congestion control algorithm change the throughput of a single bulk TCP flow on a high-bandwidth, high-latency path, and under which path conditions?</td></tr>
+<tr><td>Treatment (what varies)</td><td>The sender's congestion control: CUBIC, BBR (v1) or Reno. Each is a separate host (a-cubic, a-bbr, a-reno) sending to its own peer across the same routers, emulator and bottleneck.</td></tr>
+<tr><td>Path conditions (factors)</td><td>Bottleneck <b>500 Mbit/s</b>; RTT <b>10 ms</b> (a short-path reference), <b>100 ms</b> and <b>150 ms</b>; four path types: <b>clean</b> (1 × BDP buffer, no loss), <b>shallow buffer</b> (¼ × BDP), <b>0.01 % random loss</b> and <b>0.1 % random loss</b> (1 × BDP). 3 × 4 = {{kmeta:cells}} cells.</td></tr>
+<tr><td>Controlled (identical for all three)</td><td>Everything on the hosts: the same image, kernel, every TCP and socket sysctl (section 4), MTU 1500, fq on eth1, iperf3 version and options. Nothing on the hosts was changed for the experiment. Only one flow at a time crosses the bottleneck.</td></tr>
+<tr><td>Traffic</td><td>One TCP flow at a time across the bottleneck: <span class="mono">iperf3 -c &lt;peer&gt; -p 5201 -t {{kmeta:duration}} -b {{kmeta:bitrate}}</span>, a single stream (no <span class="mono">-P</span>) for {{kmeta:duration}} s with the application offering {{kmeta:bitrate}}bit/s, from a-&lt;algorithm&gt; to b-&lt;algorithm&gt;.</td></tr>
+<tr><td>Replication</td><td>One run per algorithm per profile: {{kmeta:runs}} runs in all, about {{kmeta:minutes}} minutes.</td></tr>
+<tr><td>Order</td><td>Within each profile the three algorithms run back to back in a random order (seeded, seed {{kmeta:seed}}), 2 s apart.</td></tr>
+<tr><td>Measurement</td><td>Receiver-side goodput reported by iperf3 over the whole run (start-up included); also retransmits, smoothed RTT, bottleneck drops and the sender's TCP memory-pressure events.</td></tr>
+<tr><td>Analysis</td><td>Per profile: each algorithm's goodput, and BBR's as a ratio of CUBIC's and Reno's. With one run per profile there is no within-profile variance to test against, so differences under ~5 % (the run-to-run spread seen in sections 16 and 20) count as no difference.</td></tr>
+<tr><td>Integrity checks</td><td>Before and after the experiment every host's TCP and socket sysctls, eth1 MTU and qdisc were fingerprinted (SHA-256 over 121 settings). Before: all six hosts identical apart from the algorithm: <b>{{kmeta:same}}</b> (fingerprint {{kmeta:hash}}). After: unchanged: <b>{{kmeta:unchanged}}</b>. Every run's reported algorithm matched its host; failed runs: {{kmeta:errors}}.</td></tr>
+</table>
+<p>Hypotheses, written down before the run:</p>
+<ul>
+  <li><b>H1 — clean path:</b> no meaningful difference. With no loss and a 1 × BDP buffer every algorithm can fill the pipe (section 16), so BBR should not win.</li>
+  <li><b>H2 — random loss:</b> BBR is much faster, and the gap grows with RTT. A loss-based sender halves (Reno) or cuts by 30 % (CUBIC) its window on every loss, and on a long path it needs many round trips to grow back; BBR does not treat an isolated loss as congestion.</li>
+  <li><b>H3 — shallow buffer:</b> BBR is faster on long paths. With a buffer smaller than the BDP, a loss-based sender's sawtooth falls below the pipe size after every overflow; BBR paces at the measured bottleneck rate and does not need the buffer.</li>
+</ul>
+<pre>python3 tools/bbr_experiment.py --trials 1 --duration 30 --bitrate 500M     # ~21 min; resumable; restores the WAN</pre>
+
+<h3>Results</h3>
+<div class="two">
+<div class="fig">{{chart:k_clean}}</div>
+<div class="fig">{{chart:k_shallow}}</div>
+<div class="fig">{{chart:k_loss001}}</div>
+<div class="fig">{{chart:k_loss01}}</div>
+</div>
+{{k_legend}}
+{{table:k}}
+<p class="cap">Mbit/s: iperf3 receiver goodput over the {{kmeta:duration}} s run. Ratio: BBR over the other algorithm; bold where BBR is more than 5 % ahead.</p>
+{{k_results}}
+
+<h3>What BBR pays for it</h3>
+{{table:k_cost}}
+{{k_cost_text}}
+
+<h3>Threats to validity</h3>
+<ul>
+  <li><b>Emulated loss is random and independent.</b> Real loss is often bursty or caused by congestion elsewhere. Random loss is exactly the case where BBR's design helps most, so H2 is the most favourable test for BBR; the clean and shallow-buffer cells are the fairer comparison.</li>
+  <li><b>One flow at a time.</b> This is a throughput test for a single transfer. When BBR shares a link with CUBIC or Reno it takes far more than its fair share (sections 9 and 14). Being "better" for your own transfer and being a good neighbour are different questions.</li>
+  <li><b>BBR v1.</b> Linux 6.12 ships BBR v1. BBRv3 reacts to loss above about 2 %, retransmits less, and would give smaller gains in the loss cells.</li>
+  <li><b>Small host VMs.</b> The hosts' TCP memory limit (section 4) is the same for every algorithm, and pressure events are reported in the cost table. It caps what any algorithm can reach on the longest paths, so it narrows the differences rather than creating them.</li>
+  <li><b>One run per profile.</b> Large effects (several times the throughput) are far outside run-to-run noise; small ones (a few %) are not, and the text does not claim them.</li>
+  <li><b>30 s runs include start-up.</b> At 150 ms slow start takes a few seconds of each run, the same for every algorithm. Longer transfers would bring the averages closer to the steady-state rates.</li>
+</ul>
