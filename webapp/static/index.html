@@ -131,8 +131,15 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
       </div>
       <p class="mute small" id="liveHelp" style="margin:6px 0 0">Live: the flows run until you press Stop. Move the RTT, loss, rate or buffer controls above and the running flows see the change at once. iperf3 cannot change <code>-b</code> during a test, so moving the bit-rate slider ends the flows and starts new ones with the new <code>-b</code> (a new TCP connection, from slow start); the chart marks where.</p>
       <div class="legend" id="legend"></div>
-      <div class="row small" style="margin:2px 0 4px"><span class="mute">window</span><span class="seg" id="winSeg"><button data-w="60" class="on">last 60 s</button><button data-w="180">last 3 min</button><button data-w="0">whole run</button></span>
-        <span id="liveNow" class="mono" style="margin-left:auto"></span></div>
+      <div class="ctl hist" style="margin:4px 0 6px">
+        <label for="win">Window</label>
+        <input type="range" id="win" min="5" max="305" step="5" value="60" aria-describedby="winVal">
+        <div class="big" id="winVal">60 <small>s</small></div>
+        <label for="pos">Position <span class="small">(slide back for history)</span></label>
+        <input type="range" id="pos" min="0" max="60" step="1" value="60" aria-describedby="posVal">
+        <div class="row"><span class="big" id="posVal">live</span><button id="followBtn" style="display:none" title="jump back to the newest second and keep following">Follow live</button></div>
+      </div>
+      <div class="small" id="liveNow" style="margin:0 0 6px"></div>
       <div class="charts">
         <div><h3>Throughput <span>Mbit/s, per second (sender) · dashed: bottleneck rate</span></h3><div class="chart" id="cThr"></div></div>
         <div><h3>RTT the sender sees <span>ms (smoothed RTT, TCP_INFO)</span></h3><div class="chart" id="cRtt"></div></div>
@@ -184,14 +191,14 @@ function lineChart(el, series, opt) {
   const W = 520, H = 230, L = 40, R = 12, T = 12, B = 26;
   const keys = [...ALGOS, ...Object.keys(series).filter(k => !ALGOS.includes(k))].filter(k => series[k] && series[k].length);
   const xmin = opt.xmin || 0, xmax = Math.max(opt.xmax || 0, xmin + 10);
-  for (const k of keys) series[k] = series[k].filter(q => q[0] >= xmin - 1 && q[0] <= xmax);
+  for (const k of keys) series[k] = series[k].filter(q => q[0] >= xmin - 1.5 && q[0] <= xmax + 1.5);   // one point either side, clipped to the plot
   const pts = keys.flatMap(k => series[k]), hl = opt.hlines || [];
   let ymax = Math.max(...pts.map(p => p[1]), ...hl.map(h => h.y * 1.05), opt.ymin || 1); ymax = niceMax(ymax);
-  const x = v => L + (Math.max(xmin, v) - xmin) / (xmax - xmin) * (W - L - R), y = v => T + (1 - v / ymax) * (H - T - B);
+  const x = v => L + (v - xmin) / (xmax - xmin) * (W - L - R), y = v => T + (1 - v / ymax) * (H - T - B);
   const yt = [0, .25, .5, .75, 1].map(f => f * ymax), xt = ticks(xmin, xmax);
-  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opt.aria)}">`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opt.aria)}"><defs><clipPath id="${el.id}C"><rect x="${L}" y="${T - 3}" width="${W - L - R}" height="${H - T - B + 6}"/></clipPath></defs>`;
   s += yt.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`).join('');
-  s += xt.map(v => `<text class="axis" x="${x(v)}" y="${H - 8}" text-anchor="middle">${v}s</text>`).join('');
+  s += xt.map(v => `<line class="grid" x1="${x(v)}" x2="${x(v)}" y1="${T}" y2="${H - B}"/><text class="axis" x="${x(v)}" y="${H - 8}" text-anchor="middle">${v}s</text>`).join('');
   for (const h of hl) s += `<line class="mark" x1="${L}" x2="${W - R}" y1="${y(h.y)}" y2="${y(h.y)}"/><text class="marklbl" x="${L + 4}" y="${y(h.y) - 4}">${esc(h.label)}</text>`;
   (opt.marks || []).filter(m => m.x >= xmin && m.x <= xmax).forEach((m, i) => {   // labels step down so neighbours don't collide; near the right edge they sit left of the line
     const right = x(m.x) > W - R - 150;
@@ -199,8 +206,8 @@ function lineChart(el, series, opt) {
   const lbl = [];
   for (const a of keys) {
     const p = series[a];
-    s += `<path class="series" stroke="${colorOf(a)}" d="${p.map((q, i) => (i ? 'L' : 'M') + x(q[0]).toFixed(1) + ' ' + y(q[1]).toFixed(1)).join('')}"/>`;
-    const last = p[p.length - 1]; lbl.push({a, x: Math.min(x(last[0]) + 4, W - R - 34), y: y(last[1]) - 6});
+    s += `<path class="series" clip-path="url(#${el.id}C)" stroke="${colorOf(a)}" d="${p.map((q, i) => (i ? 'L' : 'M') + x(q[0]).toFixed(1) + ' ' + y(q[1]).toFixed(1)).join('')}"/>`;
+    const last = p.filter(q => q[0] <= xmax).at(-1) || p[0]; lbl.push({a, x: Math.min(x(last[0]) + 4, W - R - 34), y: y(last[1]) - 6});
   }
   lbl.sort((m, n) => m.y - n.y);   // direct labels at the lines' ends, pushed apart so they never overlap
   for (let i = 0; i < lbl.length; i++) lbl[i].y = Math.max(lbl[i].y, i ? lbl[i - 1].y + 12 : T + 10);
@@ -237,10 +244,24 @@ function lineChart(el, series, opt) {
   hit.addEventListener('pointerleave', hide);
 }
 const niceMax = v => { const e = Math.pow(10, Math.floor(Math.log10(v))); for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * e >= v) return m * e; return 10 * e; };
-const ticks = (a, b) => { const st = [5, 10, 15, 20, 30, 60, 120, 300].find(s => (b - a) / s <= 7) || 600; const out = []; for (let v = Math.ceil(a / st) * st; v <= b; v += st) out.push(v); return out; };
+const ticks = (a, b) => { const st = [1, 5, 10, 15, 20, 30, 60, 120, 300].find(s => (b - a) / s <= 12 && s >= ((b - a) <= 10 ? 1 : 5)) || 600; const out = []; for (let v = Math.ceil(a / st) * st; v <= b; v += st) out.push(v); return out; };
 const fmt = v => v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(1).replace(/\.0$/, '') : (+v.toFixed(2)).toString();
 
-let WIN = 60;
+let WIN = 60, VIEW_END = null;   // window length (s; 0 = whole run) and its right edge (null = follow the newest second)
+function viewRange(d, now) {
+  const span = d.mode === 'live' ? Math.max(now, 5) : Math.max(d.duration || 30, now);
+  const w = WIN || span;
+  if (w >= span) return {xmin: 0, xmax: d.mode === 'live' && WIN ? WIN : span, span, w, fits: true};
+  const end = VIEW_END == null ? (d.mode === 'live' || d.running ? Math.max(now, w) : span) : Math.min(Math.max(VIEW_END, w), span);
+  return {xmin: end - w, xmax: end, span, w, fits: false};
+}
+function syncHistory(v, now) {
+  const pos = $('#pos'); pos.disabled = v.fits; pos.min = Math.ceil(v.w); pos.max = Math.ceil(v.span);
+  if (!pos.dataset.drag) pos.value = v.fits ? pos.max : Math.round(v.xmax);
+  $('#winVal').innerHTML = WIN ? `${WIN} <small>s</small>` : 'whole run';
+  $('#posVal').innerHTML = v.fits ? `<small class="mute">all ${Math.round(v.span)} s shown</small>` : VIEW_END == null ? (chartData && chartData.running ? 'live' : `${Math.round(v.xmin)}–${Math.round(v.xmax)} <small>s (end)</small>`) : `${Math.round(v.xmin)}–${Math.round(v.xmax)} <small>s</small>`;
+  $('#followBtn').style.display = VIEW_END != null && chartData && chartData.running ? '' : 'none';
+}
 const MARK_KEYS = [['rtt_ms', v => `RTT ${v} ms`], ['rate_mbit', v => `${v} Mbit/s link`], ['loss_pct', v => `loss ${v} %`], ['buffer_bdp', v => `buffer ${v} BDP`], ['bitrate_mbit', v => `-b ${brText(v)}`]];
 function markLabels(d) {
   let prev = {...(d.wan0 || {}), bitrate_mbit: d.bitrate0};
@@ -255,9 +276,7 @@ function drawCharts() {
   for (const w of d.wanS || []) (q.q ||= []).push([rt(w.ts), w.q_ms]);
   const labels = markLabels(d), marks = (d.marks || []).filter(() => t0).map((m, i) => ({x: Math.max(0, m.ts - t0), label: labels[i]}));
   const now = all.length ? rt(Math.max(...all)) : 0, live = d.mode === 'live';
-  let xmin = 0, xmax = d.duration || 30;
-  if (live) { xmax = Math.max(now, 10); if (WIN) { xmin = Math.max(0, xmax - WIN); xmax = Math.max(xmax, WIN); } }
-  else if (WIN && now > WIN && d.running) { xmax = now; xmin = now - WIN; }
+  const v = viewRange(d, now), {xmin, xmax} = v; syncHistory(v, now);
   const rate = (d.wanNow || {}).rate_mbit, br = d.bitrateNow;
   const hl = [...(rate ? [{y: rate, label: `bottleneck ${rate} Mbit/s`}] : [])];
   lineChart($('#cThr'), thr, {unit: 'Mbit/s', marks, xmin, xmax, hlines: hl, aria: 'throughput per algorithm over time'});
@@ -266,11 +285,14 @@ function drawCharts() {
   $('#qWrap').style.display = live || q.q ? '' : 'none';
   lineChart($('#cQ'), q, {unit: 'ms', marks, xmin, xmax, ymin: 1, empty: 'sampled during a live test', aria: 'bottleneck queue over time'});
   $('#legend').innerHTML = (d.algos || ALGOS).map(a => `<span><i style="background:${color(a)}"></i>${LABEL[a]} <span class="mute">(${d.direction === 'b2a' ? 'b' : 'a'}-${a})</span></span>`).join('');
-  // the latest second, per algorithm
-  const last = {}; for (const s of d.samples) last[s.cc] = s;
-  const lw = (d.wanS || []).at(-1);
-  $('#liveNow').innerHTML = d.running ? Object.values(last).map(s => `<span style="margin-right:12px"><span class="sw" style="background:${color(s.cc)}"></span>${LABEL[s.cc]} <b>${fmt(s.mbps)}</b> Mbit/s · ${fmt(s.rtt_ms)} ms</span>`).join('') +
-    (lw ? `<span class="mute">queue ${fmt(lw.q_ms)} ms · drops ${fmt(lw.drops_s)}/s</span>` : '') + (live ? ` <span class="mute">· -b ${brText(br)}</span>` : '') : '';
+  // the figures at the window's right edge: the newest second while following, the chosen moment when scrolled back
+  const back = VIEW_END != null && !v.fits, at = back ? xmax : Infinity;
+  const last = {}; for (const s of d.samples) if (rt(s.ts) <= at + 0.05) last[s.cc] = s;
+  const lw = (d.wanS || []).filter(w => rt(w.ts) <= at + 0.05).at(-1);
+  let brAt = d.bitrate0; for (const m of d.marks || []) if ('bitrate_mbit' in m && m.ts - t0 <= at) brAt = m.bitrate_mbit;
+  const st = s => `<span style="margin-right:12px"><span class="sw" style="background:${color(s.cc)}"></span>${LABEL[s.cc]} <b>${fmt(s.mbps)}</b> Mbit/s · ${fmt(s.rtt_ms)} ms · ${s.retr || 0} retr</span>`;
+  $('#liveNow').innerHTML = (d.running || back) && Object.keys(last).length ? `<span class="mute">${back ? `at ${fmt(rt(Object.values(last)[0].ts))} s` : 'now'}:</span> ` + Object.values(last).map(st).join('') +
+    (lw ? `<span class="mute">queue ${fmt(lw.q_ms)} ms · drops ${fmt(lw.drops_s)}/s</span>` : '') + (live ? ` <span class="mute">· -b ${brText(back ? brAt : br)}</span>` : '') : '';
 }
 function liveTable(r) {
   const w = r.wan || {};
@@ -428,7 +450,10 @@ function goButton() {
 function algosChosen() { return ALGOS.filter(a => $('#al_' + a).checked); }
 $('#algoPick').innerHTML = ALGOS.map(a => `<label><input type="checkbox" id="al_${a}" checked> <span class="sw" style="background:${color(a)}"></span>${LABEL[a]}</label>`).join(' ');
 document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
-document.querySelectorAll('#winSeg button').forEach(b => b.onclick = () => { WIN = +b.dataset.w; document.querySelectorAll('#winSeg button').forEach(x => x.classList.toggle('on', x === b)); drawCharts(); });
+$('#win').addEventListener('input', e => { WIN = +e.target.value > 300 ? 0 : +e.target.value; drawCharts(); });
+$('#pos').addEventListener('input', e => { e.target.dataset.drag = 1; const v = +e.target.value; VIEW_END = v >= +e.target.max ? null : v; drawCharts(); });
+$('#pos').addEventListener('change', e => { delete e.target.dataset.drag; drawCharts(); });
+$('#followBtn').onclick = () => { VIEW_END = null; drawCharts(); };
 setMode('live'); showBr(BR[+$('#br').value]);
 $('#goBtn').onclick = async () => {
   if (liveGoing()) { try { await post('/api/live/stop', {}); $('#goBtn').disabled = true; $('#goBtn').textContent = 'stopping…'; } catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } return; }
@@ -442,7 +467,7 @@ async function startRun(mode, options) {
   try { const r = await post('/api/runs', {mode, options}); openRun(r.id); }
   catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
 }
-function openRun(id) { RUN = {id, log: []}; runSince = 0; pollRun(); }
+function openRun(id) { RUN = {id, log: []}; runSince = 0; VIEW_END = null; pollRun(); }
 const parseLines = (log, tag) => log.filter(l => l.line.startsWith(tag + ' ')).map(l => { try { return JSON.parse(l.line.slice(tag.length + 1)); } catch (e) { return null; } }).filter(Boolean);
 async function pollRun() {
   if (!RUN) return;

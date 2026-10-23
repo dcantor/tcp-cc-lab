@@ -2,7 +2,17 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
-## [0.5.0] - 2026-10-23
+## [0.5.1] - 2026-10-23
+
+### Changed
+- The flow charts have a time grid every 5 s, with a label at each line. Windows over about 60 s get coarser ticks.
+- The window is now a slider, 5 s to 300 s in 5 s steps, or the whole run (it was 60 s / 3 min / whole run).
+
+### Added
+- A position slider to slide back through the run's history, during a live test or after any run. Scrolling back stops
+  the view following live; dragging to the end or pressing "Follow live" resumes. The readout above the charts shows
+  each algorithm's Mbit/s, RTT and retransmits, plus the queue, drops and `-b`, at the window's right edge.
+ - 2026-10-23
 
 ### Added
 - Portal live test (mode `live`, now the default): CUBIC, BBR and Reno at once, until stopped. Four live charts with a

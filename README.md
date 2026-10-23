@@ -35,8 +35,11 @@ Portal: http://192.168.50.231:8112 (user unit `tcp-cc-lab-webapp`, Lab Hub sign-
 default 30) applies when released, with `tc qdisc change`, so a running flow keeps going and the chart marks the change.
 
 **Live test** (the portal's default flow mode): the chosen algorithms run at once until you press Stop (at most 2–30
-min). Four charts update every second over a scrolling window (last 60 s, last 3 min or the whole run): throughput,
-the sender's smoothed RTT, retransmits per second, and the bottleneck queue at wanem. While it runs you can move:
+min). Four charts update every second, with a time grid every 5 s: throughput,
+the sender's smoothed RTT, retransmits per second, and the bottleneck queue at wanem. The **Window** slider sets the
+window from 5 s to 300 s in 5 s steps, or the whole run. The **Position** slider moves back through the run's history,
+during the test or after it; the readout then shows the figures at that moment, and "Follow live" returns to now.
+While it runs you can move:
 - the WAN controls (RTT, rate, loss, buffer): applied in place, the flows keep going;
 - the loss slider: stops from 0.001 % to 10 %, fine at the low end;
 - the **sender bit rate** slider (`iperf3 -b` per flow, 1 Mbit/s to 1000 Mbit/s or unlimited). iperf3 can't change
