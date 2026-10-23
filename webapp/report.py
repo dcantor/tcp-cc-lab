@@ -37,11 +37,12 @@ def fmt(v):
     return "–" if v is None else f"{v:.0f}" if abs(v) >= 100 else f"{v:.1f}".rstrip("0").rstrip(".") if abs(v) >= 10 else f"{v:.2f}".rstrip("0").rstrip(".")
 
 
-def chart(series, unit, xmax, marks=(), hline=None, ymax=None, w=720, h=210, legend=True):
+def chart(series, unit, xmax, marks=(), hline=None, ymax=None, w=720, h=210, legend=True, ycap=None):
     """series: [(key, label, [(x, y)])]; x in seconds from the start of the run."""
     L, R, T, B = 46, 74, 16, 28
     ys = [y for _, _, p in series for _, y in p]
     top = max(ys + ([hline[0] * 1.05] if hline else []) + [1]) * 1.05
+    if ycap and top > ycap: ymax = ycap   # scale to fit, up to ycap (above it: drawn at the top)
     st = nice_step(ymax or top); y1 = ymax or st * -(-top // st)
     X = lambda x: L + x / max(xmax, 1e-9) * (w - L - R)   # noqa: E731
     Y = lambda y: T + (1 - min(max(y, 0), y1) / y1) * (h - T - B)   # noqa: E731
@@ -231,11 +232,11 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
 
     kpis = "".join(f"<div class='kpi'><b><span class='sw' style='background:{COL[a]}'></span>{LABEL[a]}</b><span>{fmt(v)}</span> Mbit/s</div>" for a, v in kp.items())
     rate = wan0.get("rate_mbit")
-    THR_MAX = 1000   # Mbit/s: the throughput chart's fixed scale, as on the portal
+    THR_MAX = 1000   # Mbit/s: the throughput chart scales to fit, up to 1 Gbit/s, as on the portal
     above = max([x["mbps"] for x in samples] + [0]) > THR_MAX
-    figs = [("Throughput", "Mbit/s per second, sender side, scale 0–1 Gbit/s" + (" · dashed: bottleneck rate" if rate and rate <= THR_MAX else f" · bottleneck {rate:g} Mbit/s, above the scale" if rate else "")
+    figs = [("Throughput", "Mbit/s per second, sender side, scale up to 1 Gbit/s" + (" · dashed: bottleneck rate" if rate and rate <= THR_MAX else f" · bottleneck {rate:g} Mbit/s, above the scale" if rate else "")
              + (" · seconds above 1 Gbit/s are drawn at the top" if above else ""),
-             chart(ser("mbps"), "Mbit/s", xmax, mk, (rate, f"bottleneck {rate:g} Mbit/s") if rate and rate <= THR_MAX else None, ymax=THR_MAX)),
+             chart(ser("mbps"), "Mbit/s", xmax, mk, (rate, f"bottleneck {rate:g} Mbit/s") if rate and rate <= THR_MAX else None, ycap=THR_MAX)),
             ("RTT the sender sees", "smoothed RTT from TCP_INFO, ms", chart(ser("rtt_ms"), "ms", xmax, mk)),
             ("Retransmits", "segments per second", chart(ser("retr"), "retr/s", xmax, mk))]
     if wans:
