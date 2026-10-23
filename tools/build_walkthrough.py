@@ -202,6 +202,7 @@ def collect():
     put("ping_df_1500", C.run("a-cubic", f"ping -c 2 -M do -s 1600 {C.node('b-cubic')['ip']} 2>&1; true")[1].strip())
     put("solo_1500", solo(C, duration=15))
     C.wan_reset()
+    collect_wan_proof(C)
     collect_host_tcp(C)
     collect_sweep500(C)
     collect_tcp_mem_check(C)
@@ -267,6 +268,56 @@ def collect_tcp_mem_check(C=None, rtt=150, rate=500, duration=30):
     put("tcp_mem_check", {"ram_mb": ram, "tcp_mem_pages": mem, "pressure_mb": mem[1] * 4096 / 1e6, "high_mb": mem[2] * 4096 / 1e6,
                           "rtt_ms": rtt, "rate_mbit": rate, "bdp_mb": wan["bdp_bytes"] / 1e6, "duration": duration, "mbps": f.summary()["mbps"],
                           "sender_pressures": a[0] - b[0], "receiver_pressures": a[1] - b[1]})
+
+
+def collect_wan_proof(C=None, count=20):
+    """Evidence that the delay is applied on the WAN path and only there: which libvirt network each WAN-side NIC is on,
+    wanem's bridge, the qdiscs on every node, and wanem's netem packet counters around `count` pings A -> B."""
+    if C is None:
+        import cclab as C
+    virsh = ["virsh", "-c", "qemu:///system"]
+    doms = subprocess.run([*virsh, "list", "--name"], capture_output=True, text=True).stdout.split()
+    nics = {}
+    for vm in ("r1", "wanem", "r2", "a-cubic", "b-cubic"):
+        dom = next((d for d in doms if d == vm or d.endswith("-" + vm) or d.endswith("_" + vm)), None)
+        rows = subprocess.run([*virsh, "domiflist", dom], capture_output=True, text=True).stdout.splitlines()[2:] if dom else []
+        nics[vm] = [{"if": f"eth{i}", "network": r.split()[2], "mac": r.split()[4]} for i, r in enumerate(x for x in rows if x.strip())]
+    qd = {n: C.run(n, "tc qdisc show 2>/dev/null | grep -E 'netem|tbf' || true")[1].strip() for n in ("r1", "r2", "a-cubic", "b-cubic")}
+    def counters():
+        out = {}
+        for dev in ("eth2", "eth1"):
+            t = C.run("wanem", f"tc -s qdisc show dev {dev}")[1].split("\n")
+            i = next(k for k, l in enumerate(t) if l.startswith("qdisc netem"))
+            out[dev] = int(t[i + 1].split(" pkt")[0].split()[-1])
+        return out
+    before = counters(); ping = C.ping_rtt("a-cubic", "b-cubic", count); after = counters()
+    put("wan_proof", {"nics": nics, "bridge": C.run("wanem", "bridge link show")[1].strip(),
+                      "wanem_qdisc": C.run("wanem", "tc qdisc show dev eth2; tc qdisc show dev eth1")[1].strip(),
+                      "other_qdiscs": qd, "count": count, "before": before, "after": after, "ping": ping,
+                      "wan": C.wan_stats()["settings"], "when": time.strftime("%Y-%m-%d %H:%M")})
+
+
+def wan_proof_html():
+    p = DATA / "wan_proof.json"
+    if not p.exists(): return ""
+    d = json.loads(p.read_text()); n = d["nics"]
+    def net(vm, i): return next((x["network"] for x in n.get(vm, []) if x["if"] == f"eth{i}"), "?")
+    rows = "".join(f"<tr><td>{vm}</td><td class='mono'>eth{i}</td><td class='mono'>{E(net(vm, i))}</td><td>{E(role)}</td></tr>" for vm, i, role in (
+        ("a-cubic", 1, "site A host"), ("r1", 2, "site A LAN"), ("r1", 1, "toward the WAN"), ("wanem", 1, "bridge port, toward r1"),
+        ("wanem", 2, "bridge port, toward r2"), ("r2", 1, "toward the WAN"), ("r2", 2, "site B LAN"), ("b-cubic", 1, "site B host")))
+    others = "".join(f"<tr><td>{k}</td><td class='mono'>{E(v) if v else 'no netem, no tbf'}</td></tr>" for k, v in d["other_qdiscs"].items())
+    cnt = "".join(f"<tr><td class='mono'>{dev}</td><td>{lbl}</td><td class='num'>{d['before'][dev]:,}</td><td class='num'>{d['after'][dev]:,}</td><td class='num'>+{d['after'][dev] - d['before'][dev]}</td></tr>"
+                  for dev, lbl in (("eth2", "toward r2: A → B, the pings"), ("eth1", "toward r1: B → A, the replies")))
+    return (f"<h3>Checked: the delay is on the WAN path, and only there</h3>"
+            f"<p>Read from the running lab on {E(d['when'])}, WAN at {d['wan']['rtt_ms']:g} ms RTT. <b>1. wanem is the only way between the sites.</b> r1 and r2 share no network; each meets wanem on its own libvirt bridge, and wanem bridges the two:</p>"
+            f"<table><tr><th>VM</th><th>NIC</th><th>libvirt network</th><th>role</th></tr>{rows}</table>"
+            f"<pre>{E(d['bridge'])}</pre>"
+            f"<p><b>2. The impairment is on wanem's two WAN ports and nowhere else.</b> wanem:</p><pre>{E(d['wanem_qdisc'])}</pre>"
+            f"<table><tr><th>node</th><th>netem / tbf qdiscs</th></tr>{others}</table>"
+            f"<p><b>3. Traffic between the sites passes through it.</b> wanem's netem packet counters, read before and after {d['count']} pings from a-cubic to b-cubic:</p>"
+            f"<table><tr><th>wanem port</th><th>direction</th><th class='num'>packets before</th><th class='num'>after</th><th class='num'>change</th></tr>{cnt}</table>"
+            f"<p>{d['count']} echo requests delayed on the way out, {d['count']} replies on the way back. The ping RTT was {d['ping']['avg_ms']:.2f} ms (min {d['ping']['min_ms']:.2f}) against the {d['wan']['rtt_ms']:g} ms setting: "
+            f"{d['wan']['rtt_ms'] / 2:g} ms from netem in each direction plus the VMs' own forwarding. tc acts on the packets a port sends, so each direction is impaired once, on the port it leaves wanem by.</p>")
 
 
 def shoot():
@@ -895,7 +946,8 @@ def build():
     kr = (DOCS / "walkthrough.k.results.html").read_text() if (DOCS / "walkthrough.k.results.html").exists() else "<!-- -->\n<!-- -->"
     kres, kcost = (kr.split("<!-- cost -->") + [""])[:2]
     s = s.replace("{{k_results}}", kres).replace("{{k_cost_text}}", kcost)
-    s = s.replace("{{style}}", STYLE.read_text()).replace("{{results}}", res)
+    s = s.replace("{{style}}", STYLE.read_text())
+    s = s.replace("{{wan_proof}}", wan_proof_html()).replace("{{results}}", res)
     s = s.replace("{{version}}", (LAB / "VERSION").read_text().strip()).replace("{{date}}", time.strftime("%B %-d, %Y"))
     s = s.replace("{{tests}}", str(passed + failed)).replace("{{passed}}", str(passed))
     s = re.sub(r"\{\{chart:(\w+)\}\}", lambda m: CHARTS[m.group(1)](), s)

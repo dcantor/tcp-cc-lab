@@ -185,13 +185,14 @@
   <li><b>Wire-size packets.</b> Offloads are off on wanem (GRO, LRO, TSO, GSO), or netem and tbf would see 64 KB super-packets and a queue limit would mean nothing. The bytes-per-packet through tbf (≈1512 at MTU 1500, ≈9000 at 9000) confirms it.</li>
   <li><b>netem's own limit</b> defaults to 1000 packets — too few for a long fat pipe (100 Mbit/s × 150 ms one way = 1250 packets on the delay line). It would drop like a random-loss link, so wanem sizes it from the RTT and rate on every change.</li>
 </ul>
+{{wan_proof}}
 
 <h3>The hosts</h3>
 <ul>
   <li><span class="mono">net.ipv4.tcp_congestion_control</span> = the host's algorithm; <span class="mono">fq</span> on eth1 (BBR paces through it; CUBIC and Reno get the same qdisc so the comparison is fair).</li>
   <li>32 MB maximum socket buffers: at 300 ms × 100 Mbit/s the BDP is 3.75 MB; with the Linux defaults (4–6 MB) a window cap, not the algorithm, would limit throughput.</li>
   <li><span class="mono">tcp_no_metrics_save = 1</span>: otherwise Linux caches the last connection's ssthresh per destination and the next run starts where the previous one ended.</li>
-  <li>An iperf3 server on 5201; the flows are <span class="mono">iperf3 -c &lt;peer&gt; --json-stream</span> started over SSH, parsed second by second.</li>
+  <li>An iperf3 server on 5201 on every host. Each flow is one TCP connection, <span class="mono">iperf3 -c &lt;peer&gt; -p 5201 -t &lt;s&gt; -i 1 --json-stream</span> (no <span class="mono">-P</span>), started over SSH from the sender and parsed second by second; the 500 Mbit/s runs (sections 16 and 17) add <span class="mono">-t 30 -b 500M</span>.</li>
 </ul>
 
 <h3 class="page">The hosts' TCP settings</h3>

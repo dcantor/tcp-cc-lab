@@ -1,0 +1,114 @@
+{
+ "nics": {
+  "r1": [
+   {
+    "if": "eth0",
+    "network": "tcpcc-oob",
+    "mac": "52:54:00:ce:01:00"
+   },
+   {
+    "if": "eth1",
+    "network": "tcpcc-wan-a",
+    "mac": "52:54:00:ce:01:01"
+   },
+   {
+    "if": "eth2",
+    "network": "tcpcc-lan-a",
+    "mac": "52:54:00:ce:01:02"
+   }
+  ],
+  "wanem": [
+   {
+    "if": "eth0",
+    "network": "tcpcc-oob",
+    "mac": "52:54:00:ce:03:00"
+   },
+   {
+    "if": "eth1",
+    "network": "tcpcc-wan-a",
+    "mac": "52:54:00:ce:03:01"
+   },
+   {
+    "if": "eth2",
+    "network": "tcpcc-wan-b",
+    "mac": "52:54:00:ce:03:02"
+   }
+  ],
+  "r2": [
+   {
+    "if": "eth0",
+    "network": "tcpcc-oob",
+    "mac": "52:54:00:ce:02:00"
+   },
+   {
+    "if": "eth1",
+    "network": "tcpcc-wan-b",
+    "mac": "52:54:00:ce:02:01"
+   },
+   {
+    "if": "eth2",
+    "network": "tcpcc-lan-b",
+    "mac": "52:54:00:ce:02:02"
+   }
+  ],
+  "a-cubic": [
+   {
+    "if": "eth0",
+    "network": "tcpcc-oob",
+    "mac": "52:54:00:ce:04:00"
+   },
+   {
+    "if": "eth1",
+    "network": "tcpcc-lan-a",
+    "mac": "52:54:00:ce:04:01"
+   }
+  ],
+  "b-cubic": [
+   {
+    "if": "eth0",
+    "network": "tcpcc-oob",
+    "mac": "52:54:00:ce:07:00"
+   },
+   {
+    "if": "eth1",
+    "network": "tcpcc-lan-b",
+    "mac": "52:54:00:ce:07:01"
+   }
+  ]
+ },
+ "bridge": "3: eth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 master br0 state forwarding priority 32 cost 100 \n4: eth2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 master br0 state forwarding priority 32 cost 100",
+ "wanem_qdisc": "qdisc netem 1: root refcnt 2 limit 1250 delay 15ms seed 10765125526546036152\nqdisc tbf 10: parent 1:1 rate 100Mbit burst 50000b lat 26ms \nqdisc netem 1: root refcnt 2 limit 1250 delay 15ms seed 15707136766187192099\nqdisc tbf 10: parent 1:1 rate 100Mbit burst 50000b lat 26ms",
+ "other_qdiscs": {
+  "r1": "",
+  "r2": "",
+  "a-cubic": "",
+  "b-cubic": ""
+ },
+ "count": 20,
+ "before": {
+  "eth2": 229728287,
+  "eth1": 45017862
+ },
+ "after": {
+  "eth2": 229728307,
+  "eth1": 45017882
+ },
+ "ping": {
+  "src": "a-cubic",
+  "dst": "b-cubic",
+  "min_ms": 30.833,
+  "avg_ms": 30.963,
+  "max_ms": 31.106
+ },
+ "wan": {
+  "rtt_ms": 30,
+  "rate_mbit": 100,
+  "loss_pct": 0,
+  "buffer_bdp": 1,
+  "one_way_us": 15000,
+  "queue_bytes": 375000,
+  "bdp_bytes": 375000,
+  "applied": 1792763870
+ },
+ "when": "2026-10-23 11:17"
+}
