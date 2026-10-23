@@ -43,7 +43,7 @@ window from 5 s to 300 s in 5 s steps, or the whole run. Each chart has its own 
 steps) to slide that chart back through the run's history, during the test or after it; its "Live" button returns to now.
 While it runs you can move:
 - the WAN controls (RTT, rate, loss, buffer): applied in place, the flows keep going;
-- the loss slider: stops from 0.001 % to 10 %, fine at the low end;
+- the loss slider: stops from 0.0001 % (1 in a million) to 10 %, fine at the low end;
 - the **sender bit rate** slider (`iperf3 -b` per flow, 1 Mbit/s to 1000 Mbit/s or unlimited). iperf3 can't change
   `-b` during a test, so the portal ends the flows (SIGINT, so iperf3 finishes cleanly) and starts new ones. Each one
   is a new TCP connection that starts in slow start.

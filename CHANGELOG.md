@@ -2,6 +2,12 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.6.1] - 2026-10-23
+
+### Changed
+- The loss slider goes one decimal place lower: it starts at 0.0001 % (1 in 1,000,000), then 0.0002 %, 0.0005 %,
+  0.001 % and up to 10 %. netem takes it as `loss random 0.0001%`.
+
 ## [0.6.0] - 2026-10-23
 
 ### Changed
