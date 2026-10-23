@@ -15,10 +15,19 @@ table { border-collapse: collapse; width: 100%; margin: 6pt 0 8pt; font-size: 9.
 th, td { text-align: left; padding: 3.5pt 6pt; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { background: #f8fafc; color: #334155; font-weight: 600; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
-.cover { height: 235mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
-.cover .kicker { color: var(--accent); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: 10pt; }
-.cover .sub { font-size: 13pt; color: #334155; margin: 6pt 0 18pt; max-width: 150mm; }
-.cover .meta { color: var(--mute); font-size: 9.5pt; line-height: 1.7; }
+.cover { height: 240mm; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; }
+.cover .top { border-top: 5pt solid #0f172a; padding-top: 8pt; display: flex; justify-content: space-between; align-items: baseline; }
+.cover .kicker { color: var(--accent); font-weight: 700; letter-spacing: .18em; text-transform: uppercase; font-size: 10pt; }
+.cover .series { color: var(--mute); font-size: 9pt; letter-spacing: .04em; }
+.cover h1 { font-family: "Noto Serif", "Liberation Serif", Georgia, serif; font-size: 32pt; line-height: 1.15; font-weight: 700; letter-spacing: -.01em; max-width: 165mm; margin: 0 0 12pt; }
+.cover .sub { font-family: "Noto Serif", "Liberation Serif", Georgia, serif; font-style: italic; font-size: 13pt; line-height: 1.45; color: #334155; max-width: 160mm; margin: 0 0 22pt; }
+.cover .abstract { border-top: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; padding: 10pt 0; max-width: 170mm; }
+.cover .abstract .h { font-weight: 700; font-size: 8.5pt; letter-spacing: .14em; text-transform: uppercase; color: #0f172a; margin-bottom: 3pt; }
+.cover .abstract p { font-size: 9.8pt; line-height: 1.55; color: #334155; margin: 0; text-align: justify; }
+.cover .bottom { border-top: 1.5pt solid #0f172a; padding-top: 10pt; display: flex; justify-content: space-between; align-items: flex-end; gap: 12mm; }
+.cover .author .name { font-family: "Noto Serif", "Liberation Serif", Georgia, serif; font-size: 15pt; font-weight: 700; color: #0f172a; }
+.cover .author .date { font-size: 10.5pt; color: #334155; margin-top: 2pt; }
+.cover .meta { color: var(--mute); font-size: 8.4pt; line-height: 1.6; text-align: right; }
 .box { border: 1px solid var(--line); border-left: 4px solid var(--accent); background: #f8fafc; padding: 7pt 10pt; border-radius: 4px; margin: 8pt 0; page-break-inside: avoid; }
 .box.warn { border-left-color: var(--warn); } .box.ok { border-left-color: var(--ok); }
 .box b:first-child { color: #0f172a; }

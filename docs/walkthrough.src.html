@@ -8,13 +8,28 @@
 <body>
 
 <section class="cover">
-  <div class="kicker">Lab walkthrough</div>
-  <h1>tcp-cc-lab</h1>
-  <div class="sub">TCP congestion control across an emulated WAN: two VyOS routers joined by a Linux WAN emulator with a round-trip-time slider, and one host per algorithm — CUBIC, BBR and Reno — on each side. What each algorithm does alone, what happens when they share a 100 Mbit/s bottleneck, and how the RTT, the buffer, loss and the MTU change the answer.</div>
-  <div class="meta">
-    Version {{version}} · {{date}} · {{passed}} of {{tests}} tests passing<br>
-    Lab directory <span class="mono">~/tcp-cc-lab</span> (GitHub <span class="mono">dcantor/tcp-cc-lab</span>, private) · Lab Hub card <span class="mono">tcp-cc-lab</span> · portal port 8112<br>
-    libvirt/KVM (QEMU) · VyOS rolling · Alpine 3.22 (Linux 6.12 LTS) · iperf3 3.19
+  <div class="top">
+    <div class="kicker">White paper</div>
+    <div class="series">Network lab series · tcp-cc-lab</div>
+  </div>
+  <div class="mid">
+    <h1>TCP Congestion Control Across an Emulated WAN</h1>
+    <div class="sub">CUBIC, BBR and Reno compared through two VyOS routers, a 100 Mbit/s bottleneck and an adjustable round-trip time — a hands-on lab walkthrough with live measurements</div>
+    <div class="abstract">
+      <div class="h">Abstract</div>
+      <p>This paper documents a reproducible QEMU/libvirt lab in which one Linux host per congestion-control algorithm sends across a netem/tbf WAN emulator. It shows what each algorithm achieves alone, what happens when they share the bottleneck, and how round-trip time, buffer depth, random loss and MTU change the outcome. Every chart, table and screenshot comes from runs on the live lab. Headline results: BBR takes ~86 of 94 Mbit/s against CUBIC and Reno at 30 ms and can starve an established CUBIC flow; 1&nbsp;% loss caps CUBIC and Reno near 4 Mbit/s while BBR holds ~93; a 4&nbsp;×&nbsp;BDP buffer lets CUBIC quadruple the path delay; jumbo frames add ~4&nbsp;% goodput.</p>
+    </div>
+  </div>
+  <div class="bottom">
+    <div class="author">
+      <div class="name">Daniel Cantor</div>
+      <div class="date">{{date}}</div>
+    </div>
+    <div class="meta">
+      Version {{version}} · {{passed}} of {{tests}} tests passing<br>
+      libvirt/KVM (QEMU) · VyOS rolling · Alpine 3.22 (Linux 6.12 LTS) · iperf3 3.19<br>
+      Lab directory <span class="mono">~/tcp-cc-lab</span> · GitHub <span class="mono">dcantor/tcp-cc-lab</span> · portal port 8112
+    </div>
   </div>
 </section>
 

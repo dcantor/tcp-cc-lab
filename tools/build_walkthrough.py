@@ -466,7 +466,7 @@ def build():
     s = SRC.read_text()
     passed, failed, res = results()
     s = s.replace("{{style}}", STYLE.read_text()).replace("{{results}}", res)
-    s = s.replace("{{version}}", (LAB / "VERSION").read_text().strip()).replace("{{date}}", time.strftime("%-d %B %Y"))
+    s = s.replace("{{version}}", (LAB / "VERSION").read_text().strip()).replace("{{date}}", time.strftime("%B %-d, %Y"))
     s = s.replace("{{tests}}", str(passed + failed)).replace("{{passed}}", str(passed))
     s = re.sub(r"\{\{chart:(\w+)\}\}", lambda m: CHARTS[m.group(1)](), s)
     s = re.sub(r"\{\{table:(\w+)\}\}", lambda m: TABLES[m.group(1)](), s)

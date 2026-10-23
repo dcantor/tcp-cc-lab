@@ -20,10 +20,19 @@ table { border-collapse: collapse; width: 100%; margin: 6pt 0 8pt; font-size: 9.
 th, td { text-align: left; padding: 3.5pt 6pt; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { background: #f8fafc; color: #334155; font-weight: 600; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
-.cover { height: 235mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
-.cover .kicker { color: var(--accent); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: 10pt; }
-.cover .sub { font-size: 13pt; color: #334155; margin: 6pt 0 18pt; max-width: 150mm; }
-.cover .meta { color: var(--mute); font-size: 9.5pt; line-height: 1.7; }
+.cover { height: 240mm; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; }
+.cover .top { border-top: 5pt solid #0f172a; padding-top: 8pt; display: flex; justify-content: space-between; align-items: baseline; }
+.cover .kicker { color: var(--accent); font-weight: 700; letter-spacing: .18em; text-transform: uppercase; font-size: 10pt; }
+.cover .series { color: var(--mute); font-size: 9pt; letter-spacing: .04em; }
+.cover h1 { font-family: "Noto Serif", "Liberation Serif", Georgia, serif; font-size: 32pt; line-height: 1.15; font-weight: 700; letter-spacing: -.01em; max-width: 165mm; margin: 0 0 12pt; }
+.cover .sub { font-family: "Noto Serif", "Liberation Serif", Georgia, serif; font-style: italic; font-size: 13pt; line-height: 1.45; color: #334155; max-width: 160mm; margin: 0 0 22pt; }
+.cover .abstract { border-top: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; padding: 10pt 0; max-width: 170mm; }
+.cover .abstract .h { font-weight: 700; font-size: 8.5pt; letter-spacing: .14em; text-transform: uppercase; color: #0f172a; margin-bottom: 3pt; }
+.cover .abstract p { font-size: 9.8pt; line-height: 1.55; color: #334155; margin: 0; text-align: justify; }
+.cover .bottom { border-top: 1.5pt solid #0f172a; padding-top: 10pt; display: flex; justify-content: space-between; align-items: flex-end; gap: 12mm; }
+.cover .author .name { font-family: "Noto Serif", "Liberation Serif", Georgia, serif; font-size: 15pt; font-weight: 700; color: #0f172a; }
+.cover .author .date { font-size: 10.5pt; color: #334155; margin-top: 2pt; }
+.cover .meta { color: var(--mute); font-size: 8.4pt; line-height: 1.6; text-align: right; }
 .box { border: 1px solid var(--line); border-left: 4px solid var(--accent); background: #f8fafc; padding: 7pt 10pt; border-radius: 4px; margin: 8pt 0; page-break-inside: avoid; }
 .box.warn { border-left-color: var(--warn); } .box.ok { border-left-color: var(--ok); }
 .box b:first-child { color: #0f172a; }
@@ -51,13 +60,28 @@ pre { page-break-inside: auto; }
 <body>
 
 <section class="cover">
-  <div class="kicker">Lab walkthrough</div>
-  <h1>tcp-cc-lab</h1>
-  <div class="sub">TCP congestion control across an emulated WAN: two VyOS routers joined by a Linux WAN emulator with a round-trip-time slider, and one host per algorithm — CUBIC, BBR and Reno — on each side. What each algorithm does alone, what happens when they share a 100 Mbit/s bottleneck, and how the RTT, the buffer, loss and the MTU change the answer.</div>
-  <div class="meta">
-    Version 0.3.1 · 23 October 2026 · 19 of 19 tests passing<br>
-    Lab directory <span class="mono">~/tcp-cc-lab</span> (GitHub <span class="mono">dcantor/tcp-cc-lab</span>, private) · Lab Hub card <span class="mono">tcp-cc-lab</span> · portal port 8112<br>
-    libvirt/KVM (QEMU) · VyOS rolling · Alpine 3.22 (Linux 6.12 LTS) · iperf3 3.19
+  <div class="top">
+    <div class="kicker">White paper</div>
+    <div class="series">Network lab series · tcp-cc-lab</div>
+  </div>
+  <div class="mid">
+    <h1>TCP Congestion Control Across an Emulated WAN</h1>
+    <div class="sub">CUBIC, BBR and Reno compared through two VyOS routers, a 100 Mbit/s bottleneck and an adjustable round-trip time — a hands-on lab walkthrough with live measurements</div>
+    <div class="abstract">
+      <div class="h">Abstract</div>
+      <p>This paper documents a reproducible QEMU/libvirt lab in which one Linux host per congestion-control algorithm sends across a netem/tbf WAN emulator. It shows what each algorithm achieves alone, what happens when they share the bottleneck, and how round-trip time, buffer depth, random loss and MTU change the outcome. Every chart, table and screenshot comes from runs on the live lab. Headline results: BBR takes ~86 of 94 Mbit/s against CUBIC and Reno at 30 ms and can starve an established CUBIC flow; 1&nbsp;% loss caps CUBIC and Reno near 4 Mbit/s while BBR holds ~93; a 4&nbsp;×&nbsp;BDP buffer lets CUBIC quadruple the path delay; jumbo frames add ~4&nbsp;% goodput.</p>
+    </div>
+  </div>
+  <div class="bottom">
+    <div class="author">
+      <div class="name">Daniel Cantor</div>
+      <div class="date">October 23, 2026</div>
+    </div>
+    <div class="meta">
+      Version 0.3.1 · 19 of 19 tests passing<br>
+      libvirt/KVM (QEMU) · VyOS rolling · Alpine 3.22 (Linux 6.12 LTS) · iperf3 3.19<br>
+      Lab directory <span class="mono">~/tcp-cc-lab</span> · GitHub <span class="mono">dcantor/tcp-cc-lab</span> · portal port 8112
+    </div>
   </div>
 </section>
 
