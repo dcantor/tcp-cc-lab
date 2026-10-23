@@ -9,10 +9,12 @@ All notable changes to this lab are documented here ([Keep a Changelog](https://
 - The window is now a slider, 5 s to 300 s in 5 s steps, or the whole run (it was 60 s / 3 min / whole run).
 
 ### Added
-- A position slider to slide back through the run's history, during a live test or after any run. Scrolling back stops
-  the view following live; dragging to the end or pressing "Follow live" resumes. The readout above the charts shows
-  each algorithm's Mbit/s, RTT and retransmits, plus the queue, drops and `-b`, at the window's right edge.
- - 2026-10-23
+- A horizontal slider under each chart (throughput, RTT, retransmits, queue), moving in 5 s steps, to slide that chart
+  back through the run's history on its own, during a live test or after any run. Sliding back stops that chart
+  following live; dragging to the right end or pressing its "Live" button resumes. The readout above the charts shows
+  the newest second.
+
+## [0.5.0] - 2026-10-23
 
 ### Added
 - Portal live test (mode `live`, now the default): CUBIC, BBR and Reno at once, until stopped. Four live charts with a
