@@ -41,6 +41,10 @@ not the bottleneck; the bottleneck buffer is capped at 128 MB.
 CPU now, CPU averaged over 60 s, and memory in use, plus a CPU % chart and a memory MB chart. These charts have their
 own window slider and a history slider under each chart. Untick a node to hide it.
 
+**PDF report**: when a compete, solo or live run has finished, the Flows card's "⤓ PDF report" button downloads a
+report of the run shown (`GET /api/runs/<id>/report.pdf`). It has the setup, every change made during the run, the
+results, per-second charts, and each node's CPU and memory during the run.
+
 **Topology**: click any device (or a node in that table) to open `/config/<node>` in a new tab, with its configuration
 collected live:
 - hosts: system, interfaces, routes, the fq qdisc, congestion control, every TCP/socket sysctl, `/etc/sysctl.d`, iperf3;

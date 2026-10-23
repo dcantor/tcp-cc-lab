@@ -18,7 +18,7 @@ apply() {
   rtt="$1"; rate="$2"; loss="$3"; buf="$4"
   # one-way delay in µs; netem queue limit = packets in flight on the delay line at the bottleneck rate, x2, + 1000;
   # tbf burst >= rate / HZ (250 or 1000) and >= 2 jumbo frames (the links are MTU 9000: a frame bigger than the burst is
-  # dropped by tbf); tbf limit = BUFFER x BDP bytes, at least 4 jumbo frames and at most 128 MB (this VM has 512 MB:
+  # dropped by tbf); tbf limit = BUFFER x BDP bytes, at least 4 jumbo frames and at most 128 MB (this VM has 1 GB:
   # at 5 Gbit/s x 300 ms, 16 x BDP would be 3 GB)
   eval "$(awk -v r="$rtt" -v m="$rate" -v b="$buf" 'BEGIN {
     ow = r * 500; bps = m * 1e6; bdp = bps / 8 * r / 1000;

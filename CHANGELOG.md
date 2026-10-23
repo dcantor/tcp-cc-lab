@@ -2,6 +2,26 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.8.0] - 2026-10-23
+
+### Added
+- "⤓ PDF report" button in the Flows card. Once the run shown has finished (compete, solo or live), it downloads a PDF
+  report of that run (`GET /api/runs/<id>/report.pdf`, built once and kept as `runs/<id>.report.pdf`). The report
+  contains:
+  - throughput per algorithm;
+  - the setup: mode, flows, the iperf3 command, the sender bit rate, the WAN at the start, host MTU and VM size;
+  - every change made during the run, with its time;
+  - the results table;
+  - per-second charts of throughput, RTT, retransmits and (live) the bottleneck queue, with the changes marked;
+  - each node's CPU and memory during the run, as a table and charts.
+
+  It is built as HTML with SVG charts in `webapp/report.py` and printed by headless Chrome from a `file://` page.
+- Each flow run now keeps the nodes' CPU and memory samples for its span (`node_stats` in the run record), so its
+  report still has them after a portal restart.
+
+### Fixed
+- The WAN card and wanem's script still said wanem has 512 MB of RAM (it has had 1 GB since 0.7.0).
+
 ## [0.7.0] - 2026-10-23
 
 ### Changed

@@ -34,6 +34,8 @@ from pydantic import BaseModel, Field
 LAB = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(LAB / "tools"))
 import cclab as C  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import report as pdfreport  # noqa: E402  (app.py already has a report() endpoint)
 
 NAME = "tcp-cc-lab"
 PORT = int(os.environ.get("WEBAPP_PORT", "8112"))
@@ -346,13 +348,13 @@ class RunRequest(BaseModel):
 
 class Run(RunBase):
     LAB = NAME
-    EXTRA = {"result": "result"}
+    EXTRA = {"result": "result", "node_stats": "node_stats"}
     STEP_TITLES = {"compete": "All algorithms at once through the bottleneck", "solo": "Each algorithm alone",
                    "verify": "Verify: algorithms, WAN settings, routes, RTT across the WAN", "test": "Robot Framework suites",
                    "live": "Live test"}
 
     def __init__(self, mode, options=None, resume_of=None):
-        self.result = None; self.ctl = {"stop": False, "bitrate": None}
+        self.result = None; self.node_stats = None; self.ctl = {"stop": False, "bitrate": None}
         super().__init__(mode, options, resume_of, runs_dir=RUNS_DIR, cwd=LAB)
         o = self.options
         if mode in FLOW_MODES:
@@ -422,7 +424,8 @@ class Run(RunBase):
                 self.say("MARK " + json.dumps({"ts": round(time.time(), 2), "bitrate_mbit": br})); fs = start(br)
             time.sleep(0.25)
         stop(fs); flush(fs)
-        self.result = {"mode": "live", "direction": o["direction"], "algos": o["algos"], "wan": w0.get("settings"), "seconds": round(time.time() - t0, 1), "segments": segs}
+        self.result = {"mode": "live", "direction": o["direction"], "algos": o["algos"], "wan": w0.get("settings"), "host_mtu": (mtu() or {}).get("host_mtu"),
+                       "seconds": round(time.time() - t0, 1), "segments": segs}
         s["summary"] = f"{self.result['seconds']} s, {len(segs) // max(1, len(hs))} bit-rate segment(s)"
         bad = [g for g in segs if g["error"]]
         if bad: raise RuntimeError("; ".join(f"{g['cc']}: {g['error']}" for g in bad)[:300])
@@ -436,7 +439,12 @@ class Run(RunBase):
         suite = self.options.get("suite")
         self.record_tests(LAB / "results", s, self.sh([LAB / "tests" / "run.sh", *([f"suites/{suite}.robot"] if suite else [])], check=False))
 
-    def after(self): _wan["t"] = 0
+    def after(self):
+        _wan["t"] = 0
+        if self.mode in LIVE_MODES:   # keep the nodes' CPU / memory for the run's span with the run (the report needs it after a portal restart)
+            t0 = (self.steps[0].get("started") or self.started) - 2
+            self.node_stats = {n: [x for x in v["samples"] if t0 <= x[0] <= (self.finished or time.time()) + 2] for n, v in _stats.items()}
+            self.persist()
 
 
 install_runs_api(app, registry, resume_factory=lambda d: Run(d["mode"], d.get("options"), resume_of=d))
@@ -464,6 +472,26 @@ def start_run(req: RunRequest):
     if req.mode == "test" and o.get("suite") not in (None, "", *SUITES): raise HTTPException(422, f"options.suite: one of {', '.join(SUITES)}")
     if not all_running(): raise HTTPException(409, "the lab is not (fully) running: power it on from the Lab Hub")
     return registry.start(Run(req.mode, o))
+
+
+_report_lock = threading.Lock()
+
+
+@app.get("/api/runs/{run_id}/report.pdf", tags=["runs"], summary="PDF report of a finished compete / solo / live run: setup, changes, per-second charts, results, nodes' CPU and memory")
+def run_report(run_id: str):
+    d = registry.load(run_id)
+    if not d: raise HTTPException(404, "no such run")
+    if d["mode"] not in LIVE_MODES: raise HTTPException(422, "reports are for compete, solo and live runs")
+    if d["status"] in ("queued", "running"): raise HTTPException(409, "the run has not finished yet")
+    out = RUNS_DIR / f"{run_id}.report.pdf"
+    with _report_lock:
+        if not out.exists():
+            a = _stats.get("a-cubic") or {}; last = a["samples"][-1] if a.get("samples") else None
+            info = (f"Alpine Linux VMs, {a.get('vcpus') or '?'} vCPU and {round(last[3] / 1000, 1) if last else '?'} GB usable RAM each; fq on eth1; "
+                    "the same sysctls on every host apart from the congestion control")
+            try: pdfreport.build_pdf(pdfreport.build_html(d, VERSION, {n: list(v["samples"]) for n, v in _stats.items()}, info), out)
+            except Exception as e: raise HTTPException(500, f"report failed: {str(e)[:300]}")   # noqa: BLE001
+    return FileResponse(out, media_type="application/pdf", filename=f"tcp-cc-lab-{d['mode']}-{run_id}.pdf")
 
 
 def live_run():
