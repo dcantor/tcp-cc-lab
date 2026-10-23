@@ -5,6 +5,8 @@ congestion control algorithm (CUBIC / BBR / Reno), and the WAN emulator's settin
     cclab.py compete [--duration 30] [--direction a2b|b2a] [--algos cubic,bbr,reno] [--stagger 0]
                      all flows at once through the shared bottleneck: who gets what
     cclab.py solo    [--duration 20] [--direction a2b|b2a] [--algos ...]   one algorithm at a time, the link to itself
+    cclab.py sweep   [--rtts 0,10,30,60,100,150] [--rate 500] [--duration 20] [--direction a2b|b2a] [--algos ...]
+                     each algorithm alone at each RTT, the bottleneck at --rate; the WAN goes back to its settings after
     cclab.py rtt     [--count 10]      ping RTT a-cubic -> b-cubic (the emulated RTT + the VMs' own ~1 ms)
     cclab.py wan     [--rtt MS] [--rate MBIT] [--loss PCT] [--buffer BDP] [--reset]   show / change the WAN emulator
     cclab.py mtu     [--set 1500|9000]   the hosts' MTU (all six), and r1 / r2 / wanem's links (always 9000)
@@ -217,12 +219,47 @@ def flows(mode, duration, direction, algos, stagger=0.0):
     return out
 
 
+SWEEP_RTTS = (0, 10, 30, 60, 100, 150)
+
+
+def sweep(rtts=SWEEP_RTTS, rate_mbit=500, duration=20, direction="a2b", algos=ALGOS):
+    """For each RTT: set the WAN (RTT, rate; loss and buffer as they are), ping it, then run each algorithm alone.
+    The WAN's previous settings are put back at the end, also on error or Ctrl-C."""
+    hs = senders(direction, list(algos)); prev = wan_stats()["settings"]; mtu = mtu_state()
+    if not hs: raise SystemExit("no senders for those algorithms")
+    log(f"sweep: RTT {', '.join(f'{r:g}' for r in rtts)} ms at {rate_mbit:g} Mbit/s; {', '.join(h['cc'] for h in hs)} alone, {duration} s each; host MTU {mtu['host_mtu'] or 'mixed'}")
+    points = []
+    try:
+        for rtt in rtts:
+            wan = wan_apply(rtt, rate_mbit)["settings"]; time.sleep(1)
+            ping = ping_rtt(hs[0]["name"], hs[0]["peer"])
+            log(f"=== RTT {rtt:g} ms (ping avg {ping['avg_ms']} ms), BDP {wan['bdp_bytes']} B, queue {wan['queue_bytes']} B")
+            res = []
+            for h in hs:
+                before = wan_stats()[direction]; t0 = time.time()
+                f = Flow(h, duration, t0); f.start(); f.join(duration + 60)
+                after = wan_stats()[direction]; r = f.summary()
+                r["drops"] = after["drops"] - before["drops"]; r["samples"] = [{k: x[k] for k in ("t", "mbps", "rtt_ms", "cwnd", "retr")} for x in f.samples]
+                res.append(r)
+                log(f"{r['cc']:>6} {r['mbps']:>7} Mbit/s  retr {r['retransmits']:>6}  drops {r['drops']:>6}  rtt mean {r['rtt_ms']['mean']} ms" + (f"  ERROR {r['error']}" if r["error"] else ""))
+                time.sleep(2)
+            points.append({"rtt_ms": rtt, "ping": ping, "wan": wan, "flows": res})
+    finally:
+        wan_apply(prev["rtt_ms"], prev["rate_mbit"], prev["loss_pct"], prev["buffer_bdp"])
+        log(f"WAN back to RTT {prev['rtt_ms']} ms, {prev['rate_mbit']} Mbit/s")
+    return {"mode": "sweep", "direction": direction, "duration": duration, "rate_mbit": rate_mbit, "rtts": list(rtts),
+            "algos": [h["cc"] for h in hs], "host_mtu": mtu["host_mtu"], "wan_restored": prev, "points": points}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
     for m, d in (("compete", 30), ("solo", 20)):
         p = sp.add_parser(m); p.add_argument("--duration", type=int, default=d); p.add_argument("--direction", choices=("a2b", "b2a"), default="a2b")
         p.add_argument("--algos", default=",".join(ALGOS)); p.add_argument("--stagger", type=float, default=0.0)
+    p = sp.add_parser("sweep"); p.add_argument("--rtts", default=",".join(map(str, SWEEP_RTTS))); p.add_argument("--rate", type=float, default=500)
+    p.add_argument("--duration", type=int, default=20); p.add_argument("--direction", choices=("a2b", "b2a"), default="a2b"); p.add_argument("--algos", default=",".join(ALGOS))
+    p.add_argument("--samples", action="store_true", help="keep the per-second samples in the JSON")
     p = sp.add_parser("rtt"); p.add_argument("--count", type=int, default=10); p.add_argument("--src", default="a-cubic"); p.add_argument("--dst", default="b-cubic")
     p = sp.add_parser("wan"); p.add_argument("--rtt", type=float); p.add_argument("--rate", type=float); p.add_argument("--loss", type=float)
     p.add_argument("--buffer", type=float); p.add_argument("--reset", action="store_true")
@@ -235,6 +272,18 @@ def main():
         if not 5 <= a.duration <= 300: ap.error("--duration: 5 .. 300 s")
         res = flows(a.cmd, a.duration, a.direction, algos, a.stagger)
         res.pop("samples", None) if a.cmd == "solo" else None
+    elif a.cmd == "sweep":
+        algos = [x.strip() for x in a.algos.split(",") if x.strip()]
+        if [x for x in algos if x not in ALGOS]: ap.error("unknown algorithm(s)")
+        try: rtts = [int(v) if float(v).is_integer() else float(v) for v in (x.strip() for x in a.rtts.split(",")) if v]
+        except ValueError: ap.error("--rtts: comma-separated numbers")
+        if not rtts or not all(LIMITS["rtt_ms"][0] <= r <= LIMITS["rtt_ms"][1] for r in rtts): ap.error("--rtts: 0 .. 300 ms")
+        if not LIMITS["rate_mbit"][0] <= a.rate <= LIMITS["rate_mbit"][1]: ap.error("--rate: 1 .. 1000 Mbit/s")
+        if not 5 <= a.duration <= 300: ap.error("--duration: 5 .. 300 s")
+        res = sweep(rtts, a.rate, a.duration, a.direction, algos)
+        if not a.samples:
+            for pt in res["points"]:
+                for r in pt["flows"]: r.pop("samples", None)
     elif a.cmd == "rtt": res = ping_rtt(a.src, a.dst, a.count)
     elif a.cmd == "mtu": res = mtu_set(a.set) if a.set else mtu_state()
     elif a.reset: res = wan_reset()
@@ -242,6 +291,7 @@ def main():
     else: res = wan_stats()
     print(json.dumps(res, indent=1))
     if a.cmd in ("compete", "solo") and any(r["error"] for r in res["flows"]): sys.exit(1)
+    if a.cmd == "sweep" and any(r["error"] for pt in res["points"] for r in pt["flows"]): sys.exit(1)
 
 
 if __name__ == "__main__": main()

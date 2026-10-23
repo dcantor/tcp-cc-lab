@@ -427,7 +427,7 @@ cmd_verify() {   # quick end-to-end look: algorithms, the WAN settings, routing,
   [[ $ok -eq $tot && $bad -eq 0 ]]
 }
 
-cmd_flows() { python3 "$LAB_DIR/tools/cclab.py" "$@"; }   # tools/cclab.py: compete | solo | rtt | wan (JSON on stdout)
+cmd_flows() { python3 "$LAB_DIR/tools/cclab.py" "$@"; }   # tools/cclab.py: compete | solo | sweep | rtt | wan (JSON on stdout)
 
 cmd_exec() {   # exec <node|all|hosts> <command...>
   local t="${1:?node|all|hosts}"; shift; local ns n
@@ -460,7 +460,7 @@ usage: $(basename "$0") <command> [node...]
   mtu show | set ${HOST_MTUS[*]// /|}   the hosts' MTU (all six; r1 / r2 / wanem links always $INFRA_MTU)
   wan show|stats|apply RTT_MS RATE_MBIT LOSS_PCT BUFFER_BDP|reset   the WAN emulator (defaults: $WAN_RTT_MS ms RTT, $WAN_RATE_MBIT Mbit/s)
   cc                   each host's congestion control, qdisc, iperf3 server
-  flows <sub> [opts]   compete | solo | rtt | wan  (tools/cclab.py --help)
+  flows <sub> [opts]   compete | solo | sweep | rtt | wan  (tools/cclab.py --help)
   verify               algorithms, WAN settings, routes, ping RTT between every site A / site B pair
   configure [router..] re-apply the routers' config over SSH;  bootstrap [router..]  day-0 over the console again
   exec <node|hosts|all> <cmd>   run a command (hosts/all: in parallel)

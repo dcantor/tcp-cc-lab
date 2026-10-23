@@ -4,6 +4,7 @@
     build_walkthrough.py --refresh     collect everything from the running lab into docs/data/ and docs/img/ (~12 min:
                                        show commands, the experiments, a portal run and its screenshots), then build
     build_walkthrough.py               build from docs/data/ as collected last time
+    build_walkthrough.py --sweep500    re-run only walkthrough J (the 500 Mbit/s RTT series, ~8 min), then build
     build_walkthrough.py --html-only   stop after docs/walkthrough.html
 
 Placeholders in the source: {{text:NAME}} (docs/data/NAME.txt, preformatted), {{val:NAME.path}} (a value from
@@ -201,6 +202,7 @@ def collect():
     put("ping_df_1500", C.run("a-cubic", f"ping -c 2 -M do -s 1600 {C.node('b-cubic')['ip']} 2>&1; true")[1].strip())
     put("solo_1500", solo(C, duration=15))
     C.wan_reset()
+    collect_sweep500(C)
     # the portal: metrics, SD, a run with RTT changes, screenshots
     ck = portal_cookie()
     put("metrics", "\n".join(l for l in portal("/metrics", cookie=ck, raw=True).splitlines()
@@ -209,6 +211,14 @@ def collect():
     rec = portal_run(ck); put("portal_rec", rec)
     C.wan_reset()
     shoot()
+
+
+def collect_sweep500(C=None):
+    """J: each algorithm alone at RTT 0, 10, 30, 60, 100, 150 ms with the bottleneck at 500 Mbit/s (cclab sweep)."""
+    if C is None:
+        import cclab as C
+    put("sweep500", C.sweep(C.SWEEP_RTTS, 500, 20, "a2b", C.ALGOS))
+    C.wan_reset()
 
 
 def shoot():
@@ -237,7 +247,7 @@ def nice_max(v):
     return 10 * e
 
 
-def svg_lines(series, ylabel, xlabel="seconds", marks=(), ymax=None, h=230, w=680, log=False, legend=True, hline=None):
+def svg_lines(series, ylabel, xlabel="seconds", marks=(), ymax=None, h=230, w=680, log=False, legend=True, hline=None, xticks=None, dots=False):
     """series: [(key, label, [(x, y)])] — 2px lines in the algorithm's colour, a legend plus end labels, recessive grid;
     marks: [(x, text)] vertical dashed rules (an RTT change); hline: (y, text) a reference level."""
     left, right, top, bot = 48, 70, 24 if legend else 10, 34
@@ -253,7 +263,7 @@ def svg_lines(series, ylabel, xlabel="seconds", marks=(), ymax=None, h=230, w=68
         s.append(f"<line x1='{left}' y1='{y:.1f}' x2='{w - right}' y2='{y:.1f}' stroke='{'#d4d4d0' if i == 0 else '#ecebe8'}'/>")
         s.append(f"<text x='{left - 6}' y='{y + 3.5:.1f}' text-anchor='end' fill='#52514e'>{v:g}</text>")
     step = 5 if x1 <= 50 else 10
-    for t in range(0, int(x1) + 1, step):
+    for t in (xticks or range(0, int(x1) + 1, step)):
         s.append(f"<text x='{X(t):.1f}' y='{h - bot + 14}' text-anchor='middle' fill='#52514e'>{t}</text>")
     s.append(f"<text x='{(left + w - right) / 2:.0f}' y='{h - 4}' text-anchor='middle' fill='#52514e'>{E(xlabel)}</text>")
     s.append(f"<text x='12' y='{(top + h - bot) / 2:.0f}' transform='rotate(-90 12 {(top + h - bot) / 2:.0f})' text-anchor='middle' fill='#52514e'>{E(ylabel)}</text>")
@@ -269,6 +279,8 @@ def svg_lines(series, ylabel, xlabel="seconds", marks=(), ymax=None, h=230, w=68
         if not pts: continue
         d = " ".join(f"{'M' if i == 0 else 'L'}{X(x):.1f},{Y(y):.1f}" for i, (x, y) in enumerate(pts))
         s.append(f"<path d='{d}' fill='none' stroke='{COL.get(key, '#52514e')}' stroke-width='2' stroke-linejoin='round'/>")
+        if dots:
+            s.extend(f"<circle cx='{X(x):.1f}' cy='{Y(y):.1f}' r='4' fill='{COL.get(key, '#52514e')}' stroke='#fff' stroke-width='2'/>" for x, y in pts)
         ends.append([Y(pts[-1][1]), label, pts[-1][1]])
     ends.sort()
     for i in range(1, len(ends)):   # keep end labels 12px apart
@@ -359,6 +371,38 @@ def chart_sweep():
 CHARTS["sweep"] = chart_sweep
 
 
+def s500(): return j("sweep500")
+
+
+def chart_s500(field):
+    d = s500(); rtts = [p["rtt_ms"] for p in d["points"]]; series = []
+    for cc in d["algos"]:
+        pts = []
+        for p in d["points"]:
+            f = next(f for f in p["flows"] if f["cc"] == cc)
+            if field == "mbps": y = f["mbps"]
+            else: y = max(0.0, f["rtt_ms"]["mean"] - p["ping"]["min_ms"])   # queueing the flow added on top of the idle path
+            pts.append((p["rtt_ms"], y))
+        series.append((cc, NAME[cc], pts))
+    if field == "mbps":
+        return svg_lines(series, "Mbit/s (whole 20 s run)", xlabel="emulated RTT, ms", xticks=rtts, dots=True, ymax=nice_max(d["rate_mbit"] * 1.05),
+                         hline=(d["rate_mbit"], f"bottleneck {d['rate_mbit']:g} Mbit/s"))
+    return svg_lines(series, "queueing delay added, ms", xlabel="emulated RTT, ms", xticks=rtts, dots=True)
+
+
+def chart_s500_ramp():
+    d = s500(); p = d["points"][-1]
+    series = [(f["cc"], NAME[f["cc"]], [(s["t"] if s["t"] else i + 1, s["mbps"]) for i, s in enumerate(f["samples"])]) for f in p["flows"]]
+    series = [(k, l, [(i + 1, y) for i, (_, y) in enumerate(pts)]) for k, l, pts in series]
+    return svg_lines(series, "Mbit/s", xlabel=f"seconds since each flow started (RTT {p['rtt_ms']:g} ms, each alone)",
+                     hline=(d["rate_mbit"], f"bottleneck {d['rate_mbit']:g} Mbit/s"), ymax=nice_max(d["rate_mbit"] * 1.15))
+
+
+CHARTS["s500_mbps"] = lambda: chart_s500("mbps")
+CHARTS["s500_queue"] = lambda: chart_s500("queue")
+CHARTS["s500_ramp"] = chart_s500_ramp
+
+
 def flows_table(r, with_total=True):
     rows = []
     for f in r["flows"]:
@@ -415,6 +459,18 @@ def table_mtu():
             "<tr><th class='num'>MSS</th><th class='num'>bytes / packet</th><th class='num'>Mbit/s</th><th class='num'>MSS</th><th class='num'>bytes / packet</th><th class='num'>Mbit/s</th></tr>" + rows + "</table>")
 
 
+def table_s500():
+    d = s500(); rows = []
+    for p in d["points"]:
+        v = {f["cc"]: f for f in p["flows"]}
+        rows.append(f"<tr><td class='num'>{p['rtt_ms']:g}</td><td class='num'>{p['ping']['avg_ms']:.1f}</td><td class='num'>{p['wan']['queue_bytes'] / 1e6:.2f}</td>"
+                    + "".join(f"<td class='num'>{v[c]['mbps']:.1f}</td><td class='num'>{v[c]['retransmits']}</td><td class='num'>{f1(v[c]['rtt_ms']['mean'])}</td>" for c in d["algos"]) + "</tr>")
+    head = "".join(f"<th colspan=3><span class='sw' style='background:{COL[c]}'></span>{NAME[c]}</th>" for c in d["algos"])
+    sub = "<th class='num'>Mbit/s</th><th class='num'>retr</th><th class='num'>RTT mean</th>" * len(d["algos"])
+    return ("<table><tr><th rowspan=2 class='num'>RTT set (ms)</th><th rowspan=2 class='num'>ping avg (ms)</th><th rowspan=2 class='num'>buffer (MB)</th>" + head + "</tr>"
+            "<tr>" + sub + "</tr>" + "".join(rows) + "</table>")
+
+
 TABLES = {
     "compete_default": lambda: flows_table(j("compete_default")),
     "compete_shallow": lambda: flows_table(j("compete_shallow")),
@@ -422,7 +478,7 @@ TABLES = {
     "solo_default": lambda: solo_table("solo_default"),
     "solo_bloat": lambda: solo_table("solo_bloat"),
     "solo_loss": lambda: solo_table("solo_loss"),
-    "sweep": table_sweep, "rttchange": table_rttchange, "mtu": table_mtu,
+    "sweep": table_sweep, "rttchange": table_rttchange, "mtu": table_mtu, "s500": table_s500,
 }
 
 
@@ -489,4 +545,5 @@ def build():
 if __name__ == "__main__":
     if "--refresh" in sys.argv: collect()
     elif "--shots" in sys.argv: shoot()
+    elif "--sweep500" in sys.argv: collect_sweep500()
     build()

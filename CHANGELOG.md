@@ -2,6 +2,20 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.4.0] - 2026-10-23
+
+### Added
+- `cclab.py sweep` / `lab.sh flows sweep`: each algorithm alone, in turn, at RTT 0, 10, 30, 60, 100 and 150 ms with
+  the bottleneck at 500 Mbit/s (`--rtts`, `--rate`, `--duration`, `--algos`); the WAN's previous settings are restored
+  at the end, also on error.
+- Robot suite `05_rtt_series`: one test per algorithm (CUBIC, BBR, Reno) over that series, 15 s per point; >= 80 % of
+  the rate up to 60 ms, >= 40 % at 100 and 150 ms, the reported algorithm and the RTT floor checked at every point.
+- Walkthrough J (section 16) in the PDF: the 500 Mbit/s series from a live run (throughput by RTT, the 150 ms ramp,
+  queueing delay added, per-point table); `build_walkthrough.py --sweep500` re-measures just that series. Findings 9-10.
+
+### Changed
+- The walkthrough's cover is a white-paper title page (author, date, abstract).
+
 ## [0.3.1] - 2026-10-23
 
 ### Added
