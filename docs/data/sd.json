@@ -1,0 +1,12 @@
+[
+ {
+  "targets": [
+   "10.0.0.1:8112"
+  ],
+  "labels": {
+   "lab": "tcp-cc-lab",
+   "job": "portal",
+   "role": "portal"
+  }
+ }
+]

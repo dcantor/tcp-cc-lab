@@ -1,0 +1,42 @@
+== hosts
+a-cubic  cc cubic  (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+a-bbr    cc bbr    (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+a-reno   cc reno   (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+b-cubic  cc cubic  (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+b-bbr    cc bbr    (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+b-reno   cc reno   (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+
+== wanem
+RTT_MS=30
+RATE_MBIT=100
+LOSS_PCT=0
+BUFFER_BDP=1
+ONE_WAY_US=15000
+QUEUE_BYTES=375000
+BDP_BYTES=375000
+APPLIED=1792729933
+
+== routers
+  [r1] eth1             UP             100.64.14.1/30 fe80::5054:ff:fece:101/64 
+  [r1] eth2             UP             192.168.141.1/24 fe80::5054:ff:fece:102/64 
+  [r1] 192.168.141.0/24 dev eth2 proto kernel scope link src 192.168.141.1 
+  [r1] 192.168.142.0/24 nhid 18 via 100.64.14.2 dev eth1 proto static metric 20 
+  [r2] eth1             UP             100.64.14.2/30 fe80::5054:ff:fece:201/64 
+  [r2] eth2             UP             192.168.142.1/24 fe80::5054:ff:fece:202/64 
+  [r2] 192.168.141.0/24 nhid 18 via 100.64.14.1 dev eth1 proto static metric 20 
+  [r2] 192.168.142.0/24 dev eth2 proto kernel scope link src 192.168.142.1 
+
+== infrastructure MTU (must be 9000)
+  r1, r2, wanem: every data link 9000
+
+== across the WAN: every site A host to every site B host (ping, 5 x 0.2 s; one unfragmentable at the hosts' MTU)
+  a-cubic  -> b-cubic  rtt avg 30.811 ms
+  a-cubic  -> b-bbr    rtt avg 30.885 ms
+  a-cubic  -> b-reno   rtt avg 30.838 ms
+  a-bbr    -> b-cubic  rtt avg 30.819 ms
+  a-bbr    -> b-bbr    rtt avg 30.851 ms
+  a-bbr    -> b-reno   rtt avg 30.889 ms
+  a-reno   -> b-cubic  rtt avg 30.823 ms
+  a-reno   -> b-bbr    rtt avg 30.838 ms
+  a-reno   -> b-reno   rtt avg 30.815 ms
+  9/9 pairs ok (hosts' MTU 1500: 1472-byte pings, DF set)

@@ -1,0 +1,9 @@
+net.ipv4.tcp_congestion_control = bbr
+net.ipv4.tcp_available_congestion_control = reno cubic bbr
+net.core.default_qdisc = fq
+net.ipv4.tcp_no_metrics_save = 1
+net.ipv4.tcp_rmem = 4096	131072	33554432
+net.ipv4.tcp_wmem = 4096	65536	33554432
+net.core.rmem_max = 33554432
+net.core.wmem_max = 33554432
+qdisc fq 8001: root refcnt 2 limit 10000p flow_limit 100p buckets 1024 orphan_mask 1023 bands 3 priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1 weights 589824 196608 65536 quantum 3028b initial_quantum 15140b low_rate_threshold 550Kbit refill_delay 40ms timer_slack 10us horizon 10s horizon_drop

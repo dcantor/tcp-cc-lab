@@ -1,0 +1,8 @@
+S>* 10.0.0.0/8 [1/0] via 10.14.0.1, eth0, weight 1, 01:32:03
+C>* 10.14.0.0/24 is directly connected, eth0, weight 1, 01:32:04
+L>* 10.14.0.11/32 is directly connected, eth0, weight 1, 01:32:04
+C>* 100.64.14.0/30 is directly connected, eth1, weight 1, 01:31:53
+L>* 100.64.14.1/32 is directly connected, eth1, weight 1, 01:31:53
+C>* 192.168.141.0/24 is directly connected, eth2, weight 1, 01:31:54
+L>* 192.168.141.1/32 is directly connected, eth2, weight 1, 01:31:54
+S>* 192.168.142.0/24 [1/0] via 100.64.14.2, eth1, weight 1, 01:32:03

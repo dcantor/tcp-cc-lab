@@ -1,0 +1,5 @@
+eth1             UP             52:54:00:ce:03:01 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+eth2             UP             52:54:00:ce:03:02 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+br0              UP             52:54:00:ce:03:01 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+3: eth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 master br0 state forwarding priority 32 cost 100 
+4: eth2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 master br0 state forwarding priority 32 cost 100

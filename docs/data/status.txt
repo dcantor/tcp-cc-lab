@@ -1,0 +1,12 @@
+NODE     ROLE    STATE      MGMT-IP     DATA-IP         CC     CONSOLE  VM
+r1       router  running    10.14.0.11  192.168.141.1   -      5601     tcpcc-r1
+r2       router  running    10.14.0.12  192.168.142.1   -      5602     tcpcc-r2
+wanem    wanem   running    10.14.0.20  bridge          -      5603     tcpcc-wanem
+a-cubic  host    running    10.14.0.31  192.168.141.11  cubic  5604     tcpcc-a-cubic
+a-bbr    host    running    10.14.0.32  192.168.141.12  bbr    5605     tcpcc-a-bbr
+a-reno   host    running    10.14.0.33  192.168.141.13  reno   5606     tcpcc-a-reno
+b-cubic  host    running    10.14.0.41  192.168.142.11  cubic  5607     tcpcc-b-cubic
+b-bbr    host    running    10.14.0.42  192.168.142.12  bbr    5608     tcpcc-b-bbr
+b-reno   host    running    10.14.0.43  192.168.142.13  reno   5609     tcpcc-b-reno
+
+WAN: r1 100.64.14.1 <-> wanem (br0) <-> r2 100.64.14.2; defaults RTT 30 ms, 100 Mbit/s, loss 0 %, buffer 1 x BDP

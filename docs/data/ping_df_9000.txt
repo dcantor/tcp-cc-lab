@@ -1,0 +1,8 @@
+PING 192.168.142.11 (192.168.142.11) 8972(9000) bytes of data.
+8980 bytes from 192.168.142.11: icmp_seq=1 ttl=62 time=30.9 ms
+8980 bytes from 192.168.142.11: icmp_seq=2 ttl=62 time=30.9 ms
+8980 bytes from 192.168.142.11: icmp_seq=3 ttl=62 time=30.9 ms
+
+--- 192.168.142.11 ping statistics ---
+3 packets transmitted, 3 received, 0% packet loss, time 2002ms
+rtt min/avg/max/mdev = 30.908/30.919/30.926/0.008 ms

@@ -63,6 +63,13 @@ site A → B). The VMs add about 0.9 ms of their own to the emulated RTT.
   3.1 GB, 10 s); the next start resumes them and runs `lab.sh resumed`, which sets the clocks and verifies (35 s in all,
   against several minutes cold). `lab.sh up` boots cold if a saved image will not restore; `rebuild` / `clean` discard it.
 
+## Walkthrough
+
+`docs/tcp-cc-lab-walkthrough.pdf` (35 pages): congestion control for dummies, the three algorithms, the architecture, nine
+walkthroughs with live measurements and charts, the portal, monitoring, tests and findings. Rebuild it with
+`webapp/.venv/bin/python tools/build_walkthrough.py [--refresh]` (`--refresh` re-measures, ~12 min, and leaves the WAN at
+its defaults and the hosts at 1500).
+
 ## Things that are not obvious
 
 - **Bridges, not UDP tunnels.** The data links are isolated libvirt bridges. QEMU's UDP socket backend keeps the host's

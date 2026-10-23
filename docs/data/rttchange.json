@@ -1,0 +1,646 @@
+{
+ "cubic": {
+  "summary": {
+   "host": "a-cubic",
+   "cc": "cubic",
+   "cc_reported": "cubic",
+   "mss": 1448,
+   "mbps": 84.35,
+   "sent_mbps": 87.62,
+   "retransmits": 210,
+   "rtt_ms": {
+    "mean": 127.35,
+    "min": 44.19,
+    "max": 239.59,
+    "p50_samples": 120.59
+   },
+   "error": null
+  },
+  "samples": [
+   {
+    "t": 1,
+    "ts": 1792730363.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 113.11,
+    "rtt_ms": 57.54,
+    "cwnd": 697936,
+    "retr": 134
+   },
+   {
+    "t": 2,
+    "ts": 1792730364.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 103.81,
+    "rtt_ms": 44.19,
+    "cwnd": 537208,
+    "retr": 3
+   },
+   {
+    "t": 3,
+    "ts": 1792730365.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 87.03,
+    "rtt_ms": 47.54,
+    "cwnd": 574856,
+    "retr": 0
+   },
+   {
+    "t": 4,
+    "ts": 1792730366.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 102.76,
+    "rtt_ms": 49.48,
+    "cwnd": 599472,
+    "retr": 0
+   },
+   {
+    "t": 5,
+    "ts": 1792730367.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 87.03,
+    "rtt_ms": 50.62,
+    "cwnd": 611056,
+    "retr": 0
+   },
+   {
+    "t": 6,
+    "ts": 1792730368.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 102.76,
+    "rtt_ms": 50.95,
+    "cwnd": 615400,
+    "retr": 0
+   },
+   {
+    "t": 7,
+    "ts": 1792730369.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 101.63,
+    "rtt_ms": 50.92,
+    "cwnd": 615400,
+    "retr": 0
+   },
+   {
+    "t": 8,
+    "ts": 1792730370.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 88.15,
+    "rtt_ms": 51.03,
+    "cwnd": 615400,
+    "retr": 0
+   },
+   {
+    "t": 9,
+    "ts": 1792730371.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 101.71,
+    "rtt_ms": 51.66,
+    "cwnd": 624088,
+    "retr": 0
+   },
+   {
+    "t": 10,
+    "ts": 1792730372.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 88.08,
+    "rtt_ms": 52.83,
+    "cwnd": 638568,
+    "retr": 0
+   },
+   {
+    "t": 11,
+    "ts": 1792730373.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 42.99,
+    "rtt_ms": 120.52,
+    "cwnd": 647256,
+    "retr": 0
+   },
+   {
+    "t": 12,
+    "ts": 1792730374.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 44.04,
+    "rtt_ms": 120.59,
+    "cwnd": 677664,
+    "retr": 0
+   },
+   {
+    "t": 13,
+    "ts": 1792730375.09,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 44.08,
+    "rtt_ms": 120.47,
+    "cwnd": 726896,
+    "retr": 0
+   },
+   {
+    "t": 14,
+    "ts": 1792730376.09,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 58.7,
+    "rtt_ms": 120.57,
+    "cwnd": 796400,
+    "retr": 0
+   },
+   {
+    "t": 15,
+    "ts": 1792730377.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 42.97,
+    "rtt_ms": 120.51,
+    "cwnd": 886176,
+    "retr": 0
+   },
+   {
+    "t": 16,
+    "ts": 1792730378.09,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 76.62,
+    "rtt_ms": 120.62,
+    "cwnd": 1007808,
+    "retr": 0
+   },
+   {
+    "t": 17,
+    "ts": 1792730379.09,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 70.22,
+    "rtt_ms": 120.59,
+    "cwnd": 1158400,
+    "retr": 0
+   },
+   {
+    "t": 18,
+    "ts": 1792730380.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 100.61,
+    "rtt_ms": 120.88,
+    "cwnd": 1343744,
+    "retr": 0
+   },
+   {
+    "t": 19,
+    "ts": 1792730381.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 93.33,
+    "rtt_ms": 121.51,
+    "cwnd": 1560944,
+    "retr": 0
+   },
+   {
+    "t": 20,
+    "ts": 1792730382.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 108.0,
+    "rtt_ms": 148.24,
+    "cwnd": 1820136,
+    "retr": 0
+   },
+   {
+    "t": 21,
+    "ts": 1792730383.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 94.38,
+    "rtt_ms": 162.79,
+    "cwnd": 2118424,
+    "retr": 0
+   },
+   {
+    "t": 22,
+    "ts": 1792730384.09,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 114.35,
+    "rtt_ms": 199.26,
+    "cwnd": 2461600,
+    "retr": 0
+   },
+   {
+    "t": 23,
+    "ts": 1792730385.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 114.2,
+    "rtt_ms": 230.05,
+    "cwnd": 2851112,
+    "retr": 0
+   },
+   {
+    "t": 24,
+    "ts": 1792730386.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 76.57,
+    "rtt_ms": 174.62,
+    "cwnd": 2122768,
+    "retr": 73
+   },
+   {
+    "t": 25,
+    "ts": 1792730387.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 114.3,
+    "rtt_ms": 190.55,
+    "cwnd": 2319696,
+    "retr": 0
+   },
+   {
+    "t": 26,
+    "ts": 1792730388.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 76.55,
+    "rtt_ms": 205.04,
+    "cwnd": 2489112,
+    "retr": 0
+   },
+   {
+    "t": 27,
+    "ts": 1792730389.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 114.29,
+    "rtt_ms": 216.87,
+    "cwnd": 2626672,
+    "retr": 0
+   },
+   {
+    "t": 28,
+    "ts": 1792730390.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 75.5,
+    "rtt_ms": 226.41,
+    "cwnd": 2735272,
+    "retr": 0
+   },
+   {
+    "t": 29,
+    "ts": 1792730391.1,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 114.3,
+    "rtt_ms": 233.94,
+    "cwnd": 2819256,
+    "retr": 0
+   },
+   {
+    "t": 31,
+    "ts": 1792730392.53,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 76.54,
+    "rtt_ms": 239.59,
+    "cwnd": 2881520,
+    "retr": 0
+   }
+  ],
+  "at": 10,
+  "new_rtt": 120
+ },
+ "bbr": {
+  "summary": {
+   "host": "a-bbr",
+   "cc": "bbr",
+   "cc_reported": "bbr",
+   "mss": 1448,
+   "mbps": 92.35,
+   "sent_mbps": 97.34,
+   "retransmits": 899,
+   "rtt_ms": {
+    "mean": 106.74,
+    "min": 34.01,
+    "max": 161.85,
+    "p50_samples": 125.69
+   },
+   "error": null
+  },
+  "samples": [
+   {
+    "t": 1,
+    "ts": 1792730394.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 151.87,
+    "rtt_ms": 58.14,
+    "cwnd": 834048,
+    "retr": 726
+   },
+   {
+    "t": 2,
+    "ts": 1792730395.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 89.15,
+    "rtt_ms": 55.02,
+    "cwnd": 810880,
+    "retr": 129
+   },
+   {
+    "t": 3,
+    "ts": 1792730396.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 90.24,
+    "rtt_ms": 49.21,
+    "cwnd": 799296,
+    "retr": 44
+   },
+   {
+    "t": 4,
+    "ts": 1792730397.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 118.46,
+    "rtt_ms": 46.58,
+    "cwnd": 787712,
+    "retr": 0
+   },
+   {
+    "t": 5,
+    "ts": 1792730398.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 89.09,
+    "rtt_ms": 38.84,
+    "cwnd": 776128,
+    "retr": 0
+   },
+   {
+    "t": 6,
+    "ts": 1792730399.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 89.19,
+    "rtt_ms": 36.42,
+    "cwnd": 779024,
+    "retr": 0
+   },
+   {
+    "t": 7,
+    "ts": 1792730400.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 89.08,
+    "rtt_ms": 37.51,
+    "cwnd": 776128,
+    "retr": 0
+   },
+   {
+    "t": 8,
+    "ts": 1792730401.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 118.56,
+    "rtt_ms": 38.52,
+    "cwnd": 816672,
+    "retr": 0
+   },
+   {
+    "t": 9,
+    "ts": 1792730402.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 89.09,
+    "rtt_ms": 39.56,
+    "cwnd": 776128,
+    "retr": 0
+   },
+   {
+    "t": 10,
+    "ts": 1792730403.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 89.14,
+    "rtt_ms": 34.01,
+    "cwnd": 793504,
+    "retr": 0
+   },
+   {
+    "t": 11,
+    "ts": 1792730404.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 113.26,
+    "rtt_ms": 120.59,
+    "cwnd": 3023424,
+    "retr": 0
+   },
+   {
+    "t": 12,
+    "ts": 1792730405.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 83.9,
+    "rtt_ms": 124.38,
+    "cwnd": 2962608,
+    "retr": 0
+   },
+   {
+    "t": 13,
+    "ts": 1792730406.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 82.8,
+    "rtt_ms": 131.62,
+    "cwnd": 3145056,
+    "retr": 0
+   },
+   {
+    "t": 14,
+    "ts": 1792730407.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 83.91,
+    "rtt_ms": 122.36,
+    "cwnd": 3003152,
+    "retr": 0
+   },
+   {
+    "t": 15,
+    "ts": 1792730408.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 82.79,
+    "rtt_ms": 120.58,
+    "cwnd": 3000256,
+    "retr": 0
+   },
+   {
+    "t": 16,
+    "ts": 1792730409.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 83.94,
+    "rtt_ms": 133.96,
+    "cwnd": 3066864,
+    "retr": 0
+   },
+   {
+    "t": 17,
+    "ts": 1792730410.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 166.67,
+    "rtt_ms": 143.44,
+    "cwnd": 3032112,
+    "retr": 0
+   },
+   {
+    "t": 18,
+    "ts": 1792730411.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 83.9,
+    "rtt_ms": 149.77,
+    "cwnd": 2948128,
+    "retr": 0
+   },
+   {
+    "t": 19,
+    "ts": 1792730412.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 91.23,
+    "rtt_ms": 155.47,
+    "cwnd": 2939440,
+    "retr": 0
+   },
+   {
+    "t": 20,
+    "ts": 1792730413.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 92.26,
+    "rtt_ms": 151.49,
+    "cwnd": 3069760,
+    "retr": 0
+   },
+   {
+    "t": 21,
+    "ts": 1792730414.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 91.26,
+    "rtt_ms": 161.85,
+    "cwnd": 3066864,
+    "retr": 0
+   },
+   {
+    "t": 22,
+    "ts": 1792730415.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 92.23,
+    "rtt_ms": 156.55,
+    "cwnd": 2997360,
+    "retr": 0
+   },
+   {
+    "t": 23,
+    "ts": 1792730416.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 91.23,
+    "rtt_ms": 158.03,
+    "cwnd": 3118992,
+    "retr": 0
+   },
+   {
+    "t": 24,
+    "ts": 1792730417.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 83.89,
+    "rtt_ms": 155.37,
+    "cwnd": 3098720,
+    "retr": 0
+   },
+   {
+    "t": 25,
+    "ts": 1792730418.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 82.87,
+    "rtt_ms": 146.29,
+    "cwnd": 3037904,
+    "retr": 0
+   },
+   {
+    "t": 26,
+    "ts": 1792730419.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 83.82,
+    "rtt_ms": 127.31,
+    "cwnd": 2991568,
+    "retr": 0
+   },
+   {
+    "t": 27,
+    "ts": 1792730420.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 82.89,
+    "rtt_ms": 131.24,
+    "cwnd": 2927856,
+    "retr": 0
+   },
+   {
+    "t": 28,
+    "ts": 1792730421.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 83.9,
+    "rtt_ms": 125.69,
+    "cwnd": 3107408,
+    "retr": 0
+   },
+   {
+    "t": 29,
+    "ts": 1792730422.21,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 82.82,
+    "rtt_ms": 120.48,
+    "cwnd": 3072656,
+    "retr": 0
+   },
+   {
+    "t": 31,
+    "ts": 1792730423.48,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 166.71,
+    "rtt_ms": 131.82,
+    "cwnd": 3113200,
+    "retr": 0
+   }
+  ],
+  "at": 10,
+  "new_rtt": 120
+ }
+}

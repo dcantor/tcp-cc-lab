@@ -2,6 +2,15 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.3.1] - 2026-10-23
+
+### Added
+- `docs/tcp-cc-lab-walkthrough.pdf` (35 pages): congestion control for dummies, Reno / CUBIC / BBR in five minutes, the
+  architecture and build, walkthroughs (the lab comes up; each algorithm alone; all three at once; an RTT sweep; deep and
+  shallow buffers; 1 % random loss; the RTT moved under a running flow; staggered starts; jumbo frames), the portal (light
+  and dark), monitoring, tests, findings, lessons, troubleshooting. Built by `tools/build_walkthrough.py` from live data:
+  `--refresh` (~12 min) re-measures everything into `docs/data/` and re-shoots the portal into `docs/img/`.
+
 ## [0.3.0] - 2026-10-22
 
 ### Added

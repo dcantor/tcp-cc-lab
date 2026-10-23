@@ -1,0 +1,9 @@
+set interfaces ethernet eth1 address '100.64.14.1/30'
+set interfaces ethernet eth1 description 'WAN to r2 via wanem'
+set interfaces ethernet eth1 mtu '9000'
+set interfaces ethernet eth2 address '192.168.141.1/24'
+set interfaces ethernet eth2 description 'LAN site a'
+set interfaces ethernet eth2 mtu '9000'
+set protocols static route 10.0.0.0/8 next-hop 10.14.0.1
+set protocols static route 192.168.142.0/24 next-hop 100.64.14.2
+set system host-name 'r1'

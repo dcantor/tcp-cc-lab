@@ -1,0 +1,20 @@
+usage: lab.sh <command> [node...]
+  image                build images/tcpcc-alpine.qcow2 (Alpine + iperf3, iproute2, ethtool, tcpdump), ~2 min
+  up [node..]          create (if needed) and start the VMs (default: all); first boot of a router pushes its day-0 config
+  wait [node..]        until SSH answers (and cloud-init is done)
+  down [node..]        shut the VMs down
+  status | inventory   nodes, addresses, algorithms | the lab as JSON
+  mtu show | set 1500 9000   the hosts' MTU (all six; r1 / r2 / wanem links always 9000)
+  wan show|stats|apply RTT_MS RATE_MBIT LOSS_PCT BUFFER_BDP|reset   the WAN emulator (defaults: 30 ms RTT, 100 Mbit/s)
+  cc                   each host's congestion control, qdisc, iperf3 server
+  flows <sub> [opts]   compete | solo | rtt | wan  (tools/cclab.py --help)
+  verify               algorithms, WAN settings, routes, ping RTT between every site A / site B pair
+  configure [router..] re-apply the routers' config over SSH;  bootstrap [router..]  day-0 over the console again
+  exec <node|hosts|all> <cmd>   run a command (hosts/all: in parallel)
+  test [robot args]    Robot Framework suites, tests/results_<timestamp>/
+  webapp               the portal on port 8112 (user unit tcp-cc-lab-webapp)
+  ssh <node> [cmd] | console <node> | log <node> [n]
+  resumed [node..]     after the Lab Hub's fast resume: wait for SSH, set the clocks, verify
+  rebuild [node..]     re-define domains and seeds (keeps disks; stop the nodes first)
+  clean [node..]       destroy VMs and delete their disks (base images kept)
+nodes: r1 r2 wanem a-cubic a-bbr a-reno b-cubic b-bbr b-reno   (libvirt domains tcpcc-<node>; hosts/wanem lab / lab, routers vyos / vyos, your SSH key installed)

@@ -1,0 +1,30 @@
+{
+ "settings": {
+  "rtt_ms": 30,
+  "rate_mbit": 100,
+  "loss_pct": 0,
+  "buffer_bdp": 1,
+  "one_way_us": 15000,
+  "queue_bytes": 375000,
+  "bdp_bytes": 375000,
+  "applied": 1792729933
+ },
+ "a2b": {
+  "bytes": 3822336636,
+  "packets": 2066958,
+  "drops": 17888,
+  "backlog_bytes": 0,
+  "backlog_packets": 0,
+  "netem_drops": 26,
+  "delayed_packets": 0
+ },
+ "b2a": {
+  "bytes": 315808004,
+  "packets": 1131418,
+  "drops": 2414,
+  "backlog_bytes": 0,
+  "backlog_packets": 0,
+  "netem_drops": 16,
+  "delayed_packets": 0
+ }
+}

@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>tcp-cc-lab walkthrough</title>
+{{style}}
+</head>
+<body>
+
+<section class="cover">
+  <div class="kicker">Lab walkthrough</div>
+  <h1>tcp-cc-lab</h1>
+  <div class="sub">TCP congestion control across an emulated WAN: two VyOS routers joined by a Linux WAN emulator with a round-trip-time slider, and one host per algorithm — CUBIC, BBR and Reno — on each side. What each algorithm does alone, what happens when they share a 100 Mbit/s bottleneck, and how the RTT, the buffer, loss and the MTU change the answer.</div>
+  <div class="meta">
+    Version {{version}} · {{date}} · {{passed}} of {{tests}} tests passing<br>
+    Lab directory <span class="mono">~/tcp-cc-lab</span> (GitHub <span class="mono">dcantor/tcp-cc-lab</span>, private) · Lab Hub card <span class="mono">tcp-cc-lab</span> · portal port 8112<br>
+    libvirt/KVM (QEMU) · VyOS rolling · Alpine 3.22 (Linux 6.12 LTS) · iperf3 3.19
+  </div>
+</section>
+
+<h2 style="margin-top:0">Contents</h2>
+<div class="toc">
+  <div>1. What the lab is, and why</div>
+  <div>2. Congestion control for dummies</div>
+  <div>3. Reno, CUBIC and BBR in five minutes</div>
+  <div>4. Architecture</div>
+  <div>5. How it is built</div>
+  <div>6. Getting started</div>
+  <div>7. Walkthrough A — the lab comes up</div>
+  <div>8. Walkthrough B — each algorithm alone</div>
+  <div>9. Walkthrough C — all three at once</div>
+  <div>10. Walkthrough D — the RTT slider</div>
+  <div>11. Walkthrough E — the buffer: bloat and shallow</div>
+  <div>12. Walkthrough F — random loss</div>
+  <div>13. Walkthrough G — moving the RTT under a flow</div>
+  <div>14. Walkthrough H — late arrivals</div>
+  <div>15. Walkthrough I — jumbo frames</div>
+  <div>16. The portal</div>
+  <div>17. Monitoring and the Lab Hub</div>
+  <div>18. Tests</div>
+  <div>19. Findings</div>
+  <div>20. Lessons learned building it</div>
+  <div>21. Troubleshooting</div>
+  <div>22. What is not built yet</div>
+  <div>Appendix A — lab.sh</div>
+  <div>Appendix B — the WAN emulator script</div>
+  <div>Appendix C — lab.conf</div>
+</div>
+
+<!-- ================================================================== 1 -->
+<h2>1. What the lab is, and why</h2>
+<p>Every TCP sender decides, on its own, how fast to send. That decision — <b>congestion control</b> — is made by an algorithm in the sender's kernel, and Linux ships several. Three matter in practice: <b>Reno</b>, the classic from 1990 that every textbook describes; <b>CUBIC</b>, the Linux default since 2006 and the most common algorithm on the internet; and <b>BBR</b>, Google's model-based algorithm from 2016, used for YouTube and much of Google's traffic. They disagree about what congestion <i>is</i>, so they behave very differently on the same path — and very differently when they share one.</p>
+<p>This lab puts them side by side on a path you control. Two VyOS routers are joined through a WAN emulator whose round-trip time is a slider (default 30 ms, 0 to 300 ms), with a 100 Mbit/s bottleneck, a configurable buffer and optional random loss. Behind each router sit three Linux hosts, one per algorithm. Every flow goes from a host in site A to the host with the same algorithm in site B, across the same bottleneck.</p>
+<div class="box"><b>What this lab is for.</b> Behaviour, not benchmark numbers. The VMs share one 12-core machine, so absolute numbers are not those of a real WAN — but the bottleneck is real (a token bucket at 100 Mbit/s), the queue is real (its size in bytes is set and counted), the delay is real (netem holds each packet for half the RTT each way), and the senders are unmodified Linux kernels running their stock algorithms. Who wins, by how much, and at what cost in queueing delay is exactly what the lab can show.</div>
+<ul>
+  <li><b>QEMU/KVM, like the SRv6 labs.</b> Nine libvirt VMs on isolated libvirt bridges; no containers. The routers are real VyOS, configured on first boot over their serial consoles.</li>
+  <li><b>One knob at a time.</b> RTT, rate, loss, buffer and the hosts' MTU each change independently, in place, from the portal or the command line — the RTT even under a running flow.</li>
+  <li><b>Measured from the senders.</b> iperf3's per-second JSON gives each flow's throughput, smoothed RTT, congestion window and retransmits as they happen; the emulator's queue counters give the drops. Robot Framework suites turn the known behaviours into checks.</li>
+</ul>
+
+<!-- ================================================================== 2 -->
+<h2 class="page">2. Congestion control for dummies</h2>
+<p>No networking background needed. If you know what a congestion window is, skip to section 3.</p>
+
+<h3>The problem: nobody tells a sender how fast it may go</h3>
+<p>When your computer downloads a file, the data crosses a chain of links — Wi-Fi, a home router, the ISP, long-distance fibre, a data centre. The slowest link on the path, the <b>bottleneck</b>, decides how fast the transfer can go. But no one tells the sender which link that is, how fast it is, or how many other people are using it right now. The sender must find out by trying.</p>
+<p>Send too slowly and the link sits idle. Send too fast and packets pile up in the bottleneck's <b>buffer</b> (a waiting line in the router), and when the buffer is full, packets are thrown away and must be sent again. Congestion control is the sender's strategy for finding the right speed — and for sharing it fairly with everyone else doing the same thing.</p>
+
+<h3>Three words you need</h3>
+<div class="step"><div class="n">1</div><div><b>Round-trip time (RTT).</b> How long a packet takes to get to the other end and the acknowledgement to come back. Across a city, a few milliseconds; across a continent, 30 to 80 ms; across an ocean, 100 to 300 ms. The sender only learns what happened to a packet one RTT later.</div></div>
+<div class="step"><div class="n">2</div><div><b>The window.</b> How much data the sender lets be "in flight" — sent but not yet acknowledged. Speed is window divided by RTT: to go 100 Mbit/s over a 30 ms path, about 375 KB must be in flight at all times. That amount is the <b>bandwidth-delay product (BDP)</b>, the size of the "pipe".</div></div>
+<div class="step"><div class="n">3</div><div><b>The buffer.</b> The bottleneck router's waiting line. A packet that arrives while the link is busy waits there. A full buffer is a long wait (delay goes up); an overflowing buffer is a drop (a packet is lost). This lab sizes the buffer in BDPs: 1 × BDP at 30 ms holds 30 ms of data.</div></div>
+
+<div class="box"><b>An analogy.</b> The bottleneck is a single toll booth; the buffer is the queue of cars in front of it; the RTT is the time it takes a driver to hear back from the booth. <b>Reno</b> and <b>CUBIC</b> drivers keep pushing more cars into the queue until one is turned away, then send half as many — so the queue is always nearly full and everyone waits. <b>BBR</b> drivers watch how fast cars actually get through and how long the trip takes when the queue is empty, and send just that many — so the queue stays short. Put them on the same road and the polite strategy and the pushy strategy do not share evenly: who wins depends on how long the queue is allowed to get.</div>
+
+<h3>Why it matters</h3>
+<ul>
+  <li><b>Throughput on long paths.</b> The longer the RTT, the longer a loss-based sender takes to grow its window back after a drop. Reno on a transatlantic path can take minutes to recover from one loss; CUBIC was designed to fix exactly that.</li>
+  <li><b>Delay for everyone else.</b> A sender that fills the buffer adds that buffer's delay to every other packet crossing the link: the video call stutters because someone is uploading a backup. This is <b>bufferbloat</b>.</li>
+  <li><b>Fairness.</b> When different algorithms share a bottleneck, one can starve the others. Every network operator who lets the public on their links lives with the mix.</li>
+  <li><b>Loss that isn't congestion.</b> On Wi-Fi or a lossy radio link, packets get lost even when the link is empty. Reno and CUBIC take every loss as "slow down"; BBR does not.</li>
+</ul>
+
+<h3>The three, side by side</h3>
+<table>
+<tr><th></th><th>Reno</th><th>CUBIC</th><th>BBR (v1, as in Linux 6.12)</th></tr>
+<tr><td>what it reacts to</td><td>packet loss</td><td>packet loss</td><td>measured bandwidth and minimum RTT</td></tr>
+<tr><td>after a loss</td><td>halves the window</td><td>cuts it to 70 %</td><td>nothing special (loss is not a signal)</td></tr>
+<tr><td>growing again</td><td>+1 packet per RTT — slow on long paths</td><td>a cubic curve in <i>time</i>, independent of RTT</td><td>paces at the estimated bottleneck rate, probes 25 % above it every 8 RTTs</td></tr>
+<tr><td>the bottleneck queue</td><td>fills it</td><td>fills it</td><td>keeps it small (~1 BDP in flight + a little)</td></tr>
+<tr><td>sharing with the others</td><td>fair with itself, loses to CUBIC</td><td>fair with itself, beats Reno</td><td>takes the most when buffers are shallow; less when they are deep</td></tr>
+<tr><td>in Linux</td><td>always</td><td>default since 2.6.19 (2006)</td><td>since 4.9 (2016), opt-in per host or socket</td></tr>
+</table>
+
+<!-- ================================================================== 3 -->
+<h2>3. Reno, CUBIC and BBR in five minutes</h2>
+<h3>The window, slow start and AIMD</h3>
+<p>A TCP sender keeps a <b>congestion window</b> (cwnd): how many bytes it may have unacknowledged. Throughput ≈ cwnd / RTT. A new connection starts with 10 segments and doubles the window every RTT (<b>slow start</b>) until a loss — or until it reaches <span class="mono">ssthresh</span>, the level where the last loss happened. After that it is in <b>congestion avoidance</b>. Reno's congestion avoidance is <b>AIMD</b>: <i>additive increase</i> of one segment per RTT, <i>multiplicative decrease</i> by half on a loss. On a 100 Mbit/s, 30 ms path with 1500-byte packets the pipe is ~250 segments; after a halving, Reno needs 125 RTTs — almost 4 s — to fill it again. At 160 ms, 1330 segments and 665 RTTs: almost two minutes.</p>
+
+<h3>CUBIC</h3>
+<p>CUBIC (Ha, Rhee, Xu, 2008; RFC 9438) keeps the loss response but replaces the linear growth with a cubic function of the <b>time since the last loss</b>: the window grows fast at first, flattens out as it approaches the size it had when the loss happened (W<sub>max</sub>), lingers there, and then accelerates again to probe for more. Because growth depends on time and not on RTTs, a long-RTT CUBIC flow recovers about as fast in seconds as a short-RTT one. It multiplies the window by 0.7 on a loss (Reno: 0.5). It still fills the buffer: it only backs off when the buffer overflows.</p>
+
+<h3>BBR</h3>
+<p>BBR (Cardwell et al., Google, 2016) — "Bottleneck Bandwidth and Round-trip propagation time" — does not use loss as its signal. It continuously estimates two numbers: <b>BtlBw</b>, the maximum delivery rate seen over the last ~10 RTTs, and <b>RTprop</b>, the minimum RTT seen over the last 10 s. Their product is the BDP. BBR <i>paces</i> its packets (this lab puts the <span class="mono">fq</span> qdisc on every host for that) at BtlBw, keeps about 2 × BDP in flight, and cycles its pacing gain through 1.25, 0.75, 1, 1, 1, 1, 1, 1 — one RTT above the estimate to look for more bandwidth, one below to drain whatever queue that built. Every 10 s it drops to 4 packets in flight for 200 ms (<b>ProbeRTT</b>) to re-measure the empty-pipe RTT.</p>
+<div class="box warn"><b>The known catch, which this lab reproduces.</b> BBR v1 ignores loss, so in a shallow buffer it keeps sending at its estimate while the loss-based flows next to it see drops and back off — BBR takes most of the link. In a deep buffer the loss-based flows fill the queue, BBR's RTT samples go up, and its in-flight cap (2 × its BDP estimate) lets CUBIC claim more. BBRv2/v3 add a loss and ECN response to fix the first case; they are not in mainline Linux 6.12, which this lab runs.</div>
+
+<h3>What the emulator changes, and what it means</h3>
+<table class="kv">
+<tr><th>setting</th><th>range</th><th>effect on the algorithms</th></tr>
+<tr><td>RTT</td><td>0–300 ms (default 30)</td><td>a bigger pipe (BDP) to fill; slower feedback; Reno's recovery time grows with RTT², CUBIC's does not</td></tr>
+<tr><td>rate</td><td>1–1000 Mbit/s (default 100)</td><td>the bottleneck; also scales the BDP</td></tr>
+<tr><td>loss</td><td>0–20 % random, each way (default 0)</td><td>non-congestion loss: Reno and CUBIC back off on every drop, BBR does not</td></tr>
+<tr><td>buffer</td><td>0.05–16 × BDP (default 1)</td><td>shallow: loss-based flows lose often; deep: they fill it and the RTT grows by up to the buffer's drain time</td></tr>
+<tr><td>host MTU</td><td>1500 or 9000</td><td>six times fewer, bigger segments: a window grows six times faster in bytes per RTT</td></tr>
+</table>
+
+<!-- ================================================================== 4 -->
+<h2 class="page">4. Architecture</h2>
+<svg viewBox="0 0 680 250" width="100%" xmlns="http://www.w3.org/2000/svg" style="font-size:10.5px">
+  <defs><style>.b{fill:#f8fafc;stroke:#94a3b8;stroke-width:1.2} .r{fill:#eef4fc;stroke:#2a78d6;stroke-width:1.4} .w{fill:#fff4e5;stroke:#b45309;stroke-width:1.4} .t{fill:#0b0b0b} .m{fill:#52514e} .l{stroke:#94a3b8;stroke-width:2}</style></defs>
+  <text x="70" y="18" text-anchor="middle" class="m">site A · LAN A 192.168.141.0/24</text>
+  <text x="610" y="18" text-anchor="middle" class="m">site B · LAN B 192.168.142.0/24</text>
+  <g>
+    <rect x="20" y="34" width="100" height="34" rx="6" class="b"/><rect x="26" y="45" width="10" height="10" rx="2" fill="#2a78d6"/><text x="42" y="50" class="t" font-weight="600">a-cubic</text><text x="42" y="62" class="m">.11 · cubic</text>
+    <rect x="20" y="86" width="100" height="34" rx="6" class="b"/><rect x="26" y="97" width="10" height="10" rx="2" fill="#eb6834"/><text x="42" y="102" class="t" font-weight="600">a-bbr</text><text x="42" y="114" class="m">.12 · bbr</text>
+    <rect x="20" y="138" width="100" height="34" rx="6" class="b"/><rect x="26" y="149" width="10" height="10" rx="2" fill="#1baf7a"/><text x="42" y="154" class="t" font-weight="600">a-reno</text><text x="42" y="166" class="m">.13 · reno</text>
+    <rect x="560" y="34" width="100" height="34" rx="6" class="b"/><rect x="566" y="45" width="10" height="10" rx="2" fill="#2a78d6"/><text x="582" y="50" class="t" font-weight="600">b-cubic</text><text x="582" y="62" class="m">.11 · cubic</text>
+    <rect x="560" y="86" width="100" height="34" rx="6" class="b"/><rect x="566" y="97" width="10" height="10" rx="2" fill="#eb6834"/><text x="582" y="102" class="t" font-weight="600">b-bbr</text><text x="582" y="114" class="m">.12 · bbr</text>
+    <rect x="560" y="138" width="100" height="34" rx="6" class="b"/><rect x="566" y="149" width="10" height="10" rx="2" fill="#1baf7a"/><text x="582" y="154" class="t" font-weight="600">b-reno</text><text x="582" y="166" class="m">.13 · reno</text>
+  </g>
+  <line x1="120" y1="51" x2="150" y2="103" class="l"/><line x1="120" y1="103" x2="150" y2="103" class="l"/><line x1="120" y1="155" x2="150" y2="103" class="l"/>
+  <line x1="560" y1="51" x2="530" y2="103" class="l"/><line x1="560" y1="103" x2="530" y2="103" class="l"/><line x1="560" y1="155" x2="530" y2="103" class="l"/>
+  <rect x="150" y="80" width="80" height="46" rx="8" class="r"/><text x="190" y="99" text-anchor="middle" class="t" font-weight="600">r1</text><text x="190" y="113" text-anchor="middle" class="m">VyOS · .1</text>
+  <rect x="450" y="80" width="80" height="46" rx="8" class="r"/><text x="490" y="99" text-anchor="middle" class="t" font-weight="600">r2</text><text x="490" y="113" text-anchor="middle" class="m">VyOS · .1</text>
+  <line x1="230" y1="103" x2="285" y2="103" class="l"/><line x1="395" y1="103" x2="450" y2="103" class="l"/>
+  <text x="257" y="96" text-anchor="middle" class="m">eth1</text><text x="422" y="96" text-anchor="middle" class="m">eth1</text>
+  <rect x="285" y="66" width="110" height="74" rx="8" class="w"/><text x="340" y="84" text-anchor="middle" class="t" font-weight="600">wanem</text>
+  <text x="340" y="98" text-anchor="middle" class="m">br0 = eth1 + eth2</text><text x="340" y="112" text-anchor="middle" class="m">netem RTT/2 → tbf</text><text x="340" y="126" text-anchor="middle" class="m">each direction</text>
+  <text x="340" y="160" text-anchor="middle" class="m">WAN 100.64.14.0/30 (r1 .1, r2 .2), bridged through wanem</text>
+  <text x="190" y="142" text-anchor="middle" class="m">eth2 → LAN A</text><text x="490" y="142" text-anchor="middle" class="m">eth2 → LAN B</text>
+  <rect x="20" y="196" width="640" height="40" rx="6" fill="none" stroke="#cbd5e1" stroke-dasharray="4 3"/>
+  <text x="340" y="213" text-anchor="middle" class="m">OOB management tcpcc-oob 10.14.0.0/24 (eth0 on every VM; the host is .1) — r1 .11 · r2 .12 · wanem .20 · a-* .31–.33 · b-* .41–.43</text>
+  <text x="340" y="228" text-anchor="middle" class="m">MTU: hosts 1500 or 9000 (switchable) · r1, r2, wanem and the four data bridges always 9000 · OOB 1500</text>
+</svg>
+<p class="cap">Every flow runs from a site A host to its same-algorithm peer in site B (or back), through r1, wanem's bottleneck and r2.</p>
+
+<h3>Nodes</h3>
+<table>
+<tr><th>node</th><th>what</th><th class="num">vCPU</th><th class="num">RAM</th><th>data</th><th>OOB</th></tr>
+<tr><td>r1, r2</td><td>VyOS (overlay on the shared <span class="mono">vyos-base.qcow2</span>), static routes for the far LAN</td><td class="num">2</td><td class="num">1 GiB</td><td>eth1 WAN, eth2 LAN</td><td>.11, .12</td></tr>
+<tr><td>wanem</td><td>Alpine: Linux bridge br0 between eth1 (to r1) and eth2 (to r2), netem + tbf on each egress</td><td class="num">2</td><td class="num">512 MiB</td><td>eth1, eth2 (no IP)</td><td>.20</td></tr>
+<tr><td>a-cubic, a-bbr, a-reno</td><td>Alpine hosts in site A, one algorithm each, iperf3 server on 5201</td><td class="num">1</td><td class="num">256 MiB</td><td>192.168.141.11–13</td><td>.31–.33</td></tr>
+<tr><td>b-cubic, b-bbr, b-reno</td><td>the same in site B; each host's peer is the same algorithm on the other side</td><td class="num">1</td><td class="num">256 MiB</td><td>192.168.142.11–13</td><td>.41–.43</td></tr>
+</table>
+<p>Libvirt domains are <span class="mono">tcpcc-&lt;node&gt;</span>, serial consoles on 127.0.0.1:5601–5609, MACs <span class="mono">52:54:00:ce:&lt;node&gt;:&lt;nic&gt;</span>. Users: routers vyos / vyos, the rest lab / lab; your SSH key is installed everywhere. About 3.8 GiB of RAM in all.</p>
+
+<h3>The links: bridges, not tunnels</h3>
+<p>The five networks are isolated libvirt bridges: <span class="mono">tcpcc-oob</span> (with the host as gateway) and four data segments — <span class="mono">tcpcc-wan-a</span> (r1 eth1 ↔ wanem eth1), <span class="mono">tcpcc-wan-b</span> (wanem eth2 ↔ r2 eth1), <span class="mono">tcpcc-lan-a</span>, <span class="mono">tcpcc-lan-b</span>. The SRv6 labs use QEMU UDP socket tunnels for point-to-point links; this lab doesn't, because the UDP backend keeps the host's default 208 KB socket buffer and silently drops bursts (found in homa-lab). A loss nobody can see would bias exactly what this lab measures.</p>
+
+<h3>The WAN emulator</h3>
+<p>wanem is a transparent bridge: r1 and r2 see each other on the /30 as if on one wire. Each egress port carries the same two-stage impairment, so the two directions are independent (the data direction and the ACK direction each get half the RTT):</p>
+<pre>root 1:   netem  delay RTT/2, loss L % (random), limit = 2 × packets in flight on the delay line + 1000
+  └ 10:   tbf    rate R, burst max(R / 250 Hz, 2 jumbo frames), limit = BUFFER × BDP bytes (at least 4 jumbo frames)</pre>
+<ul>
+  <li><b>Delay first, then the bottleneck.</b> The queue a congestion control fills, and where it loses packets, is tbf's. Its size in bytes is set directly from the BDP and does not move when the delay does.</li>
+  <li><b>Changed in place.</b> <span class="mono">wanem apply</span> uses <span class="mono">tc qdisc change</span>, not replace: a running flow sees a new RTT within one packet, with no reset of the queue.</li>
+  <li><b>Wire-size packets.</b> Offloads are off on wanem (GRO, LRO, TSO, GSO), or netem and tbf would see 64 KB super-packets and a queue limit would mean nothing. The bytes-per-packet through tbf (≈1512 at MTU 1500, ≈9000 at 9000) confirms it.</li>
+  <li><b>netem's own limit</b> defaults to 1000 packets — too few for a long fat pipe (100 Mbit/s × 150 ms one way = 1250 packets on the delay line). It would drop like a random-loss link, so wanem sizes it from the RTT and rate on every change.</li>
+</ul>
+
+<h3>The hosts</h3>
+<ul>
+  <li><span class="mono">net.ipv4.tcp_congestion_control</span> = the host's algorithm; <span class="mono">fq</span> on eth1 (BBR paces through it; CUBIC and Reno get the same qdisc so the comparison is fair).</li>
+  <li>32 MB maximum socket buffers: at 300 ms × 100 Mbit/s the BDP is 3.75 MB; with the Linux defaults (4–6 MB) a window cap, not the algorithm, would limit throughput.</li>
+  <li><span class="mono">tcp_no_metrics_save = 1</span>: otherwise Linux caches the last connection's ssthresh per destination and the next run starts where the previous one ended.</li>
+  <li>An iperf3 server on 5201; the flows are <span class="mono">iperf3 -c &lt;peer&gt; --json-stream</span> started over SSH, parsed second by second.</li>
+</ul>
+
+<h3>MTU</h3>
+<p>r1 and r2's eth1/eth2, wanem's eth1/eth2/br0 and the four data bridges are MTU 9000, always. The hosts' eth1 is 1500 by default and switches to 9000 and back, all six together. So the infrastructure never fragments or drops anything a host sends, and the only thing the switch changes is the segment size TCP negotiates (MSS 1448 or 8948). The OOB network stays at 1500.</p>
+
+<!-- ================================================================== 5 -->
+<h2 class="page">5. How it is built</h2>
+<div class="step"><div class="n">1</div><div><b>The Alpine image</b> (<span class="mono">./lab.sh image</span>, ~2 min). A throw-away builder VM boots the Alpine 3.22 NoCloud image on libvirt's NAT network; cloud-init installs iperf3, iproute2 (full <span class="mono">tc</span> and <span class="mono">ss</span>), ethtool, tcpdump, mtr, curl and iputils ping (busybox ping can't set don't-fragment), checks the kernel has BBR, netem, tbf and fq, cleans itself and powers off. Its disk becomes <span class="mono">images/tcpcc-alpine.qcow2</span>; the build fails if <span class="mono">CHECK cc:</span> doesn't list bbr.</div></div>
+<div class="step"><div class="n">2</div><div><b>The VMs</b> (<span class="mono">./lab.sh up</span>). Each node gets a qcow2 overlay on its base image and a NoCloud seed ISO rendered from <span class="mono">lab.conf</span>: network config by MAC, <span class="mono">/etc/hosts</span>, doas (Alpine has no sudo), and a <span class="mono">local.d</span> start script — the hosts' sysctls, MTU, fq and iperf3; wanem's bridge and <span class="mono">wanem reset</span>.</div></div>
+<div class="step"><div class="n">3</div><div><b>The routers' day 0.</b> VyOS has no cloud-init seed here, so the first boot of r1 and r2 pushes their configuration over the serial console (<span class="mono">tools/vyos_console.py</span>, from srv6-core): log in, <span class="mono">configure</span>, the set commands, <span class="mono">commit</span>, <span class="mono">save</span>. A marker file stops it happening again; <span class="mono">./lab.sh configure</span> re-applies it over SSH later.</div></div>
+<div class="step"><div class="n">4</div><div><b>Verify</b> (<span class="mono">./lab.sh verify</span>): every host's algorithm, the WAN settings, the MTU of every infrastructure link, and a ping between every A/B pair — at the full host MTU with don't-fragment set.</div></div>
+
+<p>The host part of the seed (rendered per host; the algorithm is the only line that differs):</p>
+<pre>{{code:lab.sh:179-192}}</pre>
+<p>A router's configuration (r1; r2 mirrors it):</p>
+<pre>{{text:r1_config}}</pre>
+
+<!-- ================================================================== 6 -->
+<h2>6. Getting started</h2>
+<pre>cd ~/tcp-cc-lab
+./lab.sh image                         # once: images/tcpcc-alpine.qcow2 (~2 min)
+./lab.sh up                            # first boot also pushes the routers' day-0 config (~3 min)
+./lab.sh verify                        # algorithms, WAN settings, MTU, routes, RTT between every A/B pair
+./lab.sh wan apply 100 100 0 1         # RTT 100 ms, 100 Mbit/s, 0 % loss, buffer 1 × BDP
+./lab.sh flows compete --duration 30   # all three at once through the bottleneck
+./lab.sh flows solo --algos cubic,bbr  # one at a time
+./lab.sh mtu set 9000                  # hosts to jumbo (and back with 1500)
+./lab.sh test                          # the Robot suites → results/latest</pre>
+<p>Or from the <b>portal</b> (section 16) at <span class="mono">http://192.168.50.231:8112</span>, behind the Lab Hub sign-in, or from the <b>Lab Hub</b> card, which starts, saves and resumes the whole lab.</p>
+
+<!-- ================================================================== 7 -->
+<h2 class="page">7. Walkthrough A — the lab comes up</h2>
+<p><span class="mono">./lab.sh status</span> lists the nodes from <span class="mono">lab.conf</span> and libvirt's view of them:</p>
+<pre>{{text:status}}</pre>
+<p><span class="mono">./lab.sh verify</span> — each host's algorithm and qdisc, the emulator's settings, the jumbo links, and a don't-fragment ping between every pair. Nine pairs × ~31 ms: the emulated 30 ms plus about 1 ms of the VMs' own.</p>
+<pre>{{text:verify}}</pre>
+<p><span class="mono">./lab.sh cc</span> asks each host which algorithm its kernel uses, which are available, the MTU, the qdisc and whether iperf3 is listening:</p>
+<pre>{{text:cc}}</pre>
+<p>On a-bbr, the settings behind that line:</p>
+<pre>{{text:host_sysctl}}</pre>
+<p>r1's routing table: the far LAN via r2 across the WAN /30, management via the host.</p>
+<pre>{{text:r1_route}}</pre>
+<p>wanem's qdiscs at the defaults (<span class="mono">./lab.sh wan show</span>). 15 ms each way, a 100 Mbit/s token bucket, and a queue of 375 000 bytes — exactly 1 × BDP (100 Mbit/s × 30 ms). The counters are cumulative since boot.</p>
+<pre>{{text:wan_show}}</pre>
+<p>Offloads, so the qdiscs see real packets, and the bridge:</p>
+<pre>{{text:wanem_offloads}}
+
+{{text:wanem_bridge}}</pre>
+<p>The MTU of every link (<span class="mono">./lab.sh mtu show</span>):</p>
+<pre>{{text:mtu_show}}</pre>
+
+<!-- ================================================================== 8 -->
+<h2 class="page">8. Walkthrough B — each algorithm alone</h2>
+<p>The baseline: each algorithm gets the link to itself for 20 s, one after the other, at the defaults (30 ms, 100 Mbit/s, buffer 1 × BDP, MTU 1500).</p>
+<pre>./lab.sh flows solo --duration 20</pre>
+<div class="fig"><div class="t">Throughput, each flow alone (per second)</div>{{chart:solo_mbps}}</div>
+{{table:solo_default}}
+<p>Alone, all three fill the link: {{val:solo_default.0.mbps}}, {{val:solo_default.1.mbps}} and {{val:solo_default.2.mbps}} Mbit/s of receiver goodput — the ceiling is ~95.6 Mbit/s, because 1448 bytes of payload ride in 1514 bytes on the wire (the bottleneck counted {{val:solo_default.0.bytes_per_packet}} bytes per packet). The differences are in <i>how</i>: BBR retransmitted the most ({{val:solo_default.1.retransmits}}) — its startup overshoots and it keeps up to 2 × BDP in flight, which a 1 × BDP buffer cannot hold. Reno's sawtooth leaves the queue emptier on average (mean RTT {{val:solo_default.2.rtt_ms.mean}} ms against CUBIC's {{val:solo_default.0.rtt_ms.mean}} ms). The per-second points are iperf3's <i>sender-side</i> counts: they swing above 100 Mbit/s when a second's count catches bytes still in the host's socket buffer. The tables use the receiver's total, which is the real throughput.</p>
+
+<!-- ================================================================== 9 -->
+<h2 class="page">9. Walkthrough C — all three at once</h2>
+<p>Now the three start together and share the bottleneck for 40 s, same settings.</p>
+<pre>./lab.sh flows compete --duration 40</pre>
+<div class="box"><b>Jain's fairness index</b> is (Σx)² / (n · Σx²): 1 when every flow gets the same, 1/n when one flow gets everything (0.33 for three flows).</div>
+<div class="fig"><div class="t">Throughput, all three sharing 100 Mbit/s, 30 ms, buffer 1 × BDP</div>{{chart:compete_mbps}}</div>
+<div class="fig"><div class="t">Smoothed RTT as each sender sees it</div>{{chart:compete_rtt}}</div>
+{{table:compete_default}}
+<p>Together, the picture is entirely different: BBR {{val:compete_default.flows.1.mbps}} Mbit/s, CUBIC {{val:compete_default.flows.0.mbps}}, Reno {{val:compete_default.flows.2.mbps}}. All three see the same RTT — about 54 ms, 30 ms of path and ~24 ms of a full queue — because they share one queue. BBR, which does not slow down on loss and paces at its bandwidth estimate, keeps the queue full and overflowing ({{val:compete_default.bottleneck.drops}} drops in 40 s); CUBIC and Reno take every one of those drops as a signal and keep cutting their windows. This is BBR v1's best-known flaw, and the reason BBRv2/v3 added a loss response.</p>
+
+<!-- ================================================================== 10 -->
+<h2 class="page">10. Walkthrough D — the RTT slider</h2>
+<p>The same three-way contest at four round-trip times, 30 s each. The buffer stays 1 × BDP, so it grows with the RTT (it is always "one RTT of data").</p>
+<pre>for rtt in 10 30 80 160; do ./lab.sh wan apply $rtt 100 0 1; ./lab.sh flows compete --duration 30; done</pre>
+<div class="fig"><div class="t">Who gets the bottleneck, by RTT (Mbit/s)</div>{{chart:sweep}}</div>
+{{table:sweep}}
+<p>The longer the path, the more CUBIC claws back: from {{val:sweep_rtt.0.flows.0.mbps}} Mbit/s at 10 ms to {{val:sweep_rtt.3.flows.0.mbps}} at 160 ms, while BBR falls from {{val:sweep_rtt.0.flows.1.mbps}} to {{val:sweep_rtt.3.flows.1.mbps}} and fairness rises from {{val:sweep_rtt.0.jain_fairness}} to {{val:sweep_rtt.3.jain_fairness}}. CUBIC's window grows as a function of <i>time</i>, so on a long path it reclaims more of the pipe between losses per RTT than Reno, whose one-segment-per-RTT growth stays about half of CUBIC's at 80 and 160 ms. Why BBR's share shrinks with the RTT is not isolated by this run (the buffer is 1 × BDP at every RTT, so it is not the buffer depth); BBR's drops fall with the RTT too, which suggests it spends less of each loss episode overrunning the queue. Note the total stays at 92–94 Mbit/s throughout: the link is always full, only the split changes.</p>
+
+<!-- ================================================================== 11 -->
+<h2 class="page">11. Walkthrough E — the buffer: bloat and shallow</h2>
+<h3>A deep buffer: 4 × BDP at 30 ms, each algorithm alone</h3>
+<p>A buffer of 4 × BDP holds 120 ms of data at 100 Mbit/s — the bufferbloat case: an edge router or a cable modem with far more memory than the link needs.</p>
+<pre>./lab.sh wan apply 30 100 0 4; ./lab.sh flows solo --duration 20</pre>
+<div class="fig"><div class="t">Smoothed RTT, each flow alone, buffer 4 × BDP</div>{{chart:bloat_rtt}}</div>
+{{table:solo_bloat}}
+<p>The bufferbloat result, in one table. With a 120 ms buffer, CUBIC pushes its mean RTT to {{val:solo_bloat.0.rtt_ms.mean}} ms — a 30 ms path made four times slower for everyone sharing the link — with almost no drops ({{val:solo_bloat.0.drops}}), because the buffer rarely overflows. Reno's halving drains the queue now and then (mean {{val:solo_bloat.2.rtt_ms.mean}} ms). BBR keeps the queue short — mean {{val:solo_bloat.1.rtt_ms.mean}} ms with {{val:solo_bloat.1.retransmits}} retransmits — at the same throughput ({{val:solo_bloat.1.mbps}} Mbit/s). This is the case BBR was designed for.</p>
+<h3>A shallow buffer on a long path: ¼ × BDP at 100 ms, all three at once</h3>
+<pre>./lab.sh wan apply 100 100 0 0.25; ./lab.sh flows compete --duration 30</pre>
+{{table:compete_shallow}}
+<p>The other end: a quarter-BDP buffer (312 KB, 25 ms) on a 100 ms path. BBR takes {{val:compete_shallow.flows.1.mbps}} of {{val:compete_shallow.total_mbps}} Mbit/s; CUBIC gets {{val:compete_shallow.flows.0.mbps}} and Reno {{val:compete_shallow.flows.2.mbps}}. A shallow buffer is where loss-based flows suffer most against BBR: every queue that builds overflows quickly, and only one of the three flows backs off when it does.</p>
+
+<!-- ================================================================== 12 -->
+<h2 class="page">12. Walkthrough F — random loss</h2>
+<p>1 % random loss in each direction (netem), otherwise the defaults; each algorithm alone. This loss has nothing to do with congestion — the link stays empty — like a bad radio link.</p>
+<pre>./lab.sh wan apply 30 100 1 1; ./lab.sh flows solo --duration 20</pre>
+<div class="fig"><div class="t">Throughput, each flow alone, 1 % random loss each way</div>{{chart:loss_mbps}}</div>
+{{table:solo_loss}}
+<p>1 % random loss is devastating for the loss-based algorithms: CUBIC {{val:solo_loss.0.mbps}} and Reno {{val:solo_loss.2.mbps}} Mbit/s on an otherwise empty 100 Mbit/s link — with no bottleneck drops at all and an RTT at the bare path (~32 ms): they never get the window large enough to queue anything. Reno's number is almost exactly the Mathis et al. formula for loss-limited TCP, rate ≈ (MSS / RTT) × 1.22 / √p = (1448 × 8 bit / 32 ms) × 1.22 / 0.1 ≈ 4.4 Mbit/s. CUBIC, built for big windows, does no better here: with a loss every 100 packets its window never leaves the small region where it behaves like Reno. BBR ignores the losses and runs at {{val:solo_loss.1.mbps}} Mbit/s — it even overruns the queue ({{val:solo_loss.1.drops}} bottleneck drops on top of the random ones). On lossy radio links this is the whole case for BBR.</p>
+
+<!-- ================================================================== 13 -->
+<h2 class="page">13. Walkthrough G — moving the RTT under a flow</h2>
+<p>The slider is applied in place, so it can move while a flow is running. One flow alone for 30 s; at 10 s the RTT jumps from 30 to 120 ms (the buffer stays 1 × BDP <i>of the new RTT</i>). Once for CUBIC, once for BBR.</p>
+<div class="fig"><div class="t">Throughput</div>{{chart:rttchange_mbps}}</div>
+<div class="fig"><div class="t">Smoothed RTT</div>{{chart:rttchange_rtt}}</div>
+{{table:rttchange}}
+<p>Both flows survive the jump, with no error and no reset. The smoothed RTT steps to ~120 ms within a second of the change — the qdiscs were changed in place, not replaced. CUBIC's throughput halves for about 5 s (its window, sized for 30 ms, now covers only a quarter of the new pipe) and then grows back with its cubic curve; as it does, it fills the new, larger buffer (1 × BDP at 120 ms = 1.5 MB) and the RTT climbs to ~240 ms — the buffer's full drain time on top of the path. BBR's throughput barely moves: it paces at its bandwidth estimate, which the RTT change does not touch, and only its in-flight cap had to grow. Its RTT settles at 120–160 ms.</p>
+
+<!-- ================================================================== 14 -->
+<h2 class="page">14. Walkthrough H — late arrivals</h2>
+<p>CUBIC starts alone; BBR joins 10 s later, Reno 10 s after that (<span class="mono">--stagger 10</span>). Defaults otherwise. The question: can a newcomer get its share from a flow that already owns the link?</p>
+<pre>./lab.sh flows compete --duration 40 --stagger 10</pre>
+<div class="fig"><div class="t">Throughput, staggered starts</div>{{chart:stagger}}</div>
+{{table:compete_stagger}}
+<p>The most striking run. CUBIC owns the link for 10 s; when BBR starts, CUBIC is pushed down to nothing within 5 s and reports <b>0 Mbit/s for most of the next 25 s</b> — not a small share, a stall: its losses come faster than it can recover and it falls into retransmission timeouts with exponential backoff. Reno, arriving at 20 s, never gets above a few Mbit/s while BBR runs. Only when BBR's 40 s end does Reno ramp up (to ~78 Mbit/s in its last seconds) and CUBIC come back. A newcomer that ignores loss does not just win against an established loss-based flow — it can starve it. (Each flow ran 40 s from its own start, so their averages are not simultaneous and are not summed.)</p>
+
+<!-- ================================================================== 15 -->
+<h2 class="page">15. Walkthrough I — jumbo frames</h2>
+<p>The hosts switch to MTU 9000; nothing else moves. r1, r2 and wanem were 9000 all along.</p>
+<pre>./lab.sh mtu set 9000</pre>
+<pre>{{text:mtu_show_9000}}</pre>
+<p>A full-size, don't-fragment ping (8972 bytes of ICMP payload + 28 bytes of headers = 9000) crosses r1, the emulator and r2:</p>
+<pre>{{text:ping_df_9000}}</pre>
+<p>Back at 1500, a 1600-byte don't-fragment ping is refused by the sender's own stack:</p>
+<pre>{{text:ping_df_1500}}</pre>
+<p>Each algorithm alone for 15 s at each MTU (defaults otherwise). Bytes per packet are counted at the bottleneck, in wanem:</p>
+{{table:mtu}}
+<p>At 9000 every algorithm runs faster and loses less: 98–99 Mbit/s against 93–95. The gain is mostly header overhead — 8948 bytes of payload in 9014 on the wire (99.3 %) against 1448 in 1514 (95.6 %) — and partly fewer losses: six times fewer packets means fewer drop events per second, and each window step is six times bigger in bytes. The bytes per packet counted at the bottleneck ({{val:solo_9000.0.bytes_per_packet}}) prove the jumbo frames really cross r1, wanem and r2 unsplit.</p>
+<div class="box warn"><b>Change the MTU between runs.</b> A TCP connection keeps the MSS it negotiated at its start, so the portal refuses the switch while a run is going. The hosts all switch together: mixed MTUs would only measure path-MTU clamping, and the NMS alerts on it.</div>
+
+<!-- ================================================================== 16 -->
+<h2>16. The portal</h2>
+<p><span class="mono">http://192.168.50.231:8112</span> (user unit <span class="mono">tcp-cc-lab-webapp</span>, FastAPI on the shared <span class="mono">labportal</span> package, Lab Hub sign-in). Below, a compete run started from the portal, with the RTT moved from 30 to 100 ms at 16 s and back at 31 s with the slider — the dashed rules on the charts are those changes.</p>
+<ul>
+  <li><b>WAN emulator card:</b> the RTT slider (0–300 ms; applied when released, in place), rate, loss, buffer, the host MTU switch, and a ping button. Live tx rate, queue backlog and drops for both directions, polled every 2 s.</li>
+  <li><b>Flows:</b> compete or solo, duration, direction, which algorithms, stagger. Two live charts — throughput and smoothed RTT per flow — drawn from the run's <span class="mono">SAMPLE</span> lines, with a crosshair tooltip; RTT changes during a run are marked. The result table follows (Mbit/s, retransmits, RTT, MSS, Jain).</li>
+  <li><b>Topology, hosts table</b> (algorithm, MTU, fq, iperf3 per host), <b>tests</b> (run all suites or one; the last report), <b>recent runs</b>, and a light/dark switch.</li>
+</ul>
+{{img:portal-light}}
+<p class="cap">Light theme. The live tiles under the WAN controls (rate, queue, drops) are empty because this is a copy of the page fed with the run's recorded API answers — on the live page they update every 2 s.</p>
+{{img:portal-dark}}
+<p class="cap">Dark theme (the switch top right; remembered per browser).</p>
+<h3>API</h3>
+<table>
+<tr><th>endpoint</th><th>what</th></tr>
+<tr><td class="mono">GET /api/lab, /api/state</td><td>the inventory and limits; nodes' health, WAN, MTU, last tests, last result, the run going</td></tr>
+<tr><td class="mono">GET / POST /api/wan</td><td>settings and both directions' counters / change any of rtt_ms, rate_mbit, loss_pct, buffer_bdp (marks a running flows run)</td></tr>
+<tr><td class="mono">GET / POST /api/mtu</td><td>the hosts' and infrastructure MTU / <span class="mono">{"mtu": 1500|9000}</span> (refused while a run goes)</td></tr>
+<tr><td class="mono">POST /api/rtt</td><td>ping a-cubic → b-cubic now</td></tr>
+<tr><td class="mono">POST /api/runs, GET /api/runs[/id]</td><td>start compete | solo | verify | test; status, steps and log (incremental with <span class="mono">?since=</span>)</td></tr>
+<tr><td class="mono">GET /metrics, /api/sd</td><td>Prometheus metrics and HTTP service discovery</td></tr>
+<tr><td class="mono">/report/{name}</td><td>the last Robot report.html / log.html</td></tr>
+</table>
+
+<!-- ================================================================== 17 -->
+<h2 class="page">17. Monitoring and the Lab Hub</h2>
+<h3>NMS</h3>
+<p>The NMS's Prometheus discovers the portal through <span class="mono">http://10.0.0.1:8112/api/sd</span> (job <span class="mono">tcp-cc-lab</span>, every 15 s) and scrapes <span class="mono">/metrics</span>. Its config lives in <span class="mono">~/lab-portal/monitoring</span> (deployed with <span class="mono">deploy.sh</span>). Service discovery answer:</p>
+<pre>{{json:sd}}</pre>
+<p>A selection of the metrics:</p>
+<pre>{{text:metrics}}</pre>
+<table>
+<tr><th>alert (group tcp-cc-lab)</th><th>fires when</th></tr>
+<tr><td>TcpCcWanEmulatorUnreachable</td><td>the portal can't read wanem's counters</td></tr>
+<tr><td>TcpCcHostDown</td><td>a host doesn't answer SSH</td></tr>
+<tr><td>TcpCcWrongAlgorithm</td><td>a host's kernel isn't using the algorithm its name says</td></tr>
+<tr><td>TcpCcHostNotReady</td><td>no fq on eth1, or iperf3 not listening</td></tr>
+<tr><td>TcpCcInfraMtuNot9000</td><td>an r1 / r2 / wanem data link isn't 9000</td></tr>
+<tr><td>TcpCcHostMtuMixed</td><td>the hosts don't all have the same MTU</td></tr>
+<tr><td>TcpCcTestsFailing</td><td>the last Robot run had failures</td></tr>
+</table>
+<p>Grafana dashboard <b>tcp-cc-lab: overview</b> (generated by <span class="mono">gen_dashboards.py</span>): the WAN settings, both directions' bottleneck rate, backlog and drops, per-host health and MTU, and the last compete result per algorithm.</p>
+<h3>Lab Hub and fast resume</h3>
+<p>The hub's card starts and stops the lab. With <span class="mono">"fast_resume": true</span> its shutdown saves each VM's memory (<span class="mono">virsh managedsave</span>, ~3.1 GB, ~10 s) and the next start resumes them and runs <span class="mono">./lab.sh resumed</span>: wait for SSH, set the clocks (they stood still while saved), verify — about 35 s in all, against several minutes from cold. The WAN emulator's qdiscs, the hosts' sysctls and MTU, and the routes come back with the memory. <span class="mono">./lab.sh up</span> boots cold if a saved image will not restore; <span class="mono">rebuild</span> and <span class="mono">clean</span> discard it.</p>
+
+<!-- ================================================================== 18 -->
+<h2 class="page">18. Tests</h2>
+<p>Robot Framework, four suites (<span class="mono">./lab.sh test</span>, or the portal's Tests card). Keywords are Python (<span class="mono">tests/resources/TcpCc.py</span>, on top of <span class="mono">tools/cclab.py</span>); every suite starts from the defaults and the hosts at 1500, and restores them.</p>
+{{results}}
+<p>Results: <span class="mono">tests/results_&lt;timestamp&gt;/</span> (report.html, log.html, output.xml), with <span class="mono">tests/results_latest</span> and <span class="mono">results/latest</span> pointing at the newest.</p>
+
+<!-- ================================================================== 19 -->
+<h2 class="page">19. Findings</h2>
+<table>
+<tr><th>#</th><th>finding</th><th>where</th></tr>
+<tr><td class="num">1</td><td><b>Alone, all three fill the link.</b> On a clean path the algorithm hardly matters for throughput (93–95 Mbit/s at MTU 1500); it matters for the queue it leaves behind.</td><td>§8</td></tr>
+<tr><td class="num">2</td><td><b>Together, BBR v1 dominates</b> CUBIC and Reno whenever the buffer is around one BDP or less: ~86 of 94 Mbit/s at 30 ms, ~82 of 92 at 100 ms with ¼ BDP. Jain fairness ≈ 0.4 — close to "one flow takes all".</td><td>§9, §11</td></tr>
+<tr><td class="num">3</td><td><b>Longer RTTs narrow the gap.</b> At 160 ms CUBIC reaches ~30 Mbit/s against BBR's ~47 (Jain 0.84). Reno stays about half of CUBIC on long paths — CUBIC's RTT-independent growth is visible.</td><td>§10</td></tr>
+<tr><td class="num">4</td><td><b>Bufferbloat is a loss-based problem.</b> In a 4 × BDP buffer CUBIC adds ~95 ms of queueing to a 30 ms path; BBR stays near the path RTT with zero retransmits, at the same throughput.</td><td>§11</td></tr>
+<tr><td class="num">5</td><td><b>1 % random loss caps CUBIC and Reno at ~4 Mbit/s</b> of 100, matching the Mathis formula; BBR keeps ~93.</td><td>§12</td></tr>
+<tr><td class="num">6</td><td><b>BBR can starve an established CUBIC flow</b> to zero for tens of seconds (retransmission timeouts), not merely out-compete it.</td><td>§14</td></tr>
+<tr><td class="num">7</td><td><b>RTT changes are absorbed without breaking flows.</b> A 30 → 120 ms jump halves CUBIC for ~5 s; BBR's rate barely moves.</td><td>§13</td></tr>
+<tr><td class="num">8</td><td><b>Jumbo frames gain ~4 %</b> on a single flow, mostly header overhead, with far fewer retransmits.</td><td>§15</td></tr>
+</table>
+<div class="box"><b>How far to trust these.</b> One run per setting, 20–40 s each, on VMs sharing a host: the direction and the size of each effect are reproducible (the Robot suites assert them on every run), the exact Mbit/s are not — a rerun moves CUBIC's and Reno's single-digit shares by a few Mbit/s. Linux 6.12's BBR is v1; BBRv3 behaves differently in findings 2, 5 and 6, by design.</div>
+
+<!-- ================================================================== 20 -->
+<h2>20. Lessons learned building it</h2>
+<ul>
+  <li><b>Bridges, not UDP tunnels</b> for anything that measures loss (homa-lab's finding, applied from the start).</li>
+  <li><b>Turn off offloads where the qdiscs are.</b> With GRO/LRO on, wanem's tbf counted 64 KB packets and its packet limits meant nothing; bytes per packet through the bottleneck is the check.</li>
+  <li><b>netem's default 1000-packet limit is a hidden loss source</b> on long fat pipes: size it from the delay line.</li>
+  <li><b>tbf drops any frame bigger than its burst.</b> With the links at 9000, the original burst (R / 250 Hz = 50 KB, but a 2-MTU floor for slow rates of 3 KB) would have dropped every jumbo frame at low rates; the floors are now 2 and 4 jumbo frames.</li>
+  <li><b>Cached TCP metrics</b> (<span class="mono">tcp_no_metrics_save=0</span>, the default) make each run start where the previous one stopped: a CUBIC run after a lossy one starts with a tiny ssthresh.</li>
+  <li><b>Alpine is not Debian:</b> doas instead of sudo; busybox ping has no <span class="mono">-M do</span> (iputils-ping is in the image); iputils' error text is "Message too large", not "too long".</li>
+  <li><b>A libvirt network's MTU can't change while a VM uses it</b>: the jumbo bridges are redefined only with the lab stopped.</li>
+  <li><b>Headless Chrome on this host hangs on any http:// page</b>: the portal's screenshots load a file:// copy fed with the API answers recorded from a real run.</li>
+  <li><b>Clocks after a memory restore</b> are wherever they were when saved; a resumed lab sets them before verifying, or TLS and log timestamps are wrong.</li>
+</ul>
+
+<!-- ================================================================== 21 -->
+<h2>21. Troubleshooting</h2>
+<table>
+<tr><th>symptom</th><th>look at</th></tr>
+<tr><td>verify: RTT far from the setting</td><td><span class="mono">./lab.sh wan show</span> — the qdiscs; <span class="mono">./lab.sh wan reset</span> restores the defaults</td></tr>
+<tr><td>a flow gets ~0 Mbit/s or errors</td><td><span class="mono">./lab.sh cc</span> (iperf3 server up?); <span class="mono">./lab.sh ssh &lt;host&gt; cat /var/log/iperf3.log</span>; one iperf3 server serves one test at a time</td></tr>
+<tr><td>wrong algorithm on a host</td><td><span class="mono">/etc/sysctl.d/90-tcpcc.conf</span>; <span class="mono">lsmod | grep bbr</span>; <span class="mono">./lab.sh rebuild &lt;host&gt;</span> re-renders the seed</td></tr>
+<tr><td>jumbo pings fail</td><td><span class="mono">./lab.sh mtu show</span>; the libvirt bridges (<span class="mono">ip link show virbr-tccwana</span>): if not 9000, stop the lab and <span class="mono">./lab.sh up</span> redefines them</td></tr>
+<tr><td>routers lost their config</td><td><span class="mono">./lab.sh configure</span> (SSH) or <span class="mono">./lab.sh bootstrap</span> (console)</td></tr>
+<tr><td>after a hub resume, verify fails</td><td><span class="mono">./lab.sh resumed</span> again (clocks, SSH); <span class="mono">./lab.sh down; ./lab.sh up</span> for a cold boot</td></tr>
+<tr><td>portal shows nothing</td><td><span class="mono">systemctl --user status tcp-cc-lab-webapp</span>; <span class="mono">journalctl --user -u tcp-cc-lab-webapp</span></td></tr>
+</table>
+
+<!-- ================================================================== 22 -->
+<h2>22. What is not built yet</h2>
+<ul>
+  <li><b>BBRv3</b> (and BBRv2's loss/ECN response): not in mainline Linux 6.12; it would need a custom kernel in the Alpine image.</li>
+  <li><b>AQM at the bottleneck</b> — fq_codel or CAKE instead of tbf's tail-drop FIFO — to show bufferbloat fixed in the network rather than by the sender.</li>
+  <li><b>ECN</b> marking (with an AQM) and DCTCP / L4S-style senders.</li>
+  <li><b>Several flows per algorithm</b> (iperf3 <span class="mono">-P</span>) and RTT unfairness between flows with different base RTTs (per-host netem).</li>
+  <li><b>Jitter and reordering</b> on the emulated link (netem supports both; reordering disturbs the loss detectors in interesting ways).</li>
+  <li><b>Packet captures</b> from the portal (tcpdump on wanem, a cwnd-over-time plot from <span class="mono">ss -ti</span>).</li>
+</ul>
+
+<!-- ================================================================== A -->
+<h2 class="page">Appendix A — lab.sh</h2>
+<pre>{{text:usage}}</pre>
+<p><span class="mono">tools/cclab.py</span> (also <span class="mono">./lab.sh flows</span>):</p>
+<pre>{{code:tools/cclab.py:2-13}}</pre>
+
+<h2 class="page">Appendix B — the WAN emulator script</h2>
+<p><span class="mono">tools/wanem.sh</span>, installed in wanem as <span class="mono">/usr/local/bin/wanem</span>:</p>
+<pre>{{file:tools/wanem.sh}}</pre>
+
+<h2 class="page">Appendix C — lab.conf</h2>
+<pre>{{file:lab.conf}}</pre>
+
+</body>
+</html>

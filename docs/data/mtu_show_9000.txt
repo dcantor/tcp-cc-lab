@@ -1,0 +1,9 @@
+r1       eth1 9000  eth2 9000  
+r2       eth1 9000  eth2 9000  
+wanem    eth1 9000  eth2 9000  br0 9000  
+a-cubic  eth1 9000  
+a-bbr    eth1 9000  
+a-reno   eth1 9000  
+b-cubic  eth1 9000  
+b-bbr    eth1 9000  
+b-reno   eth1 9000

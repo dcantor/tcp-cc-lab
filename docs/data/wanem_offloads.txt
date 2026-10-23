@@ -1,0 +1,6 @@
+tcp-segmentation-offload: off
+generic-receive-offload: off
+large-receive-offload: off [fixed]
+tcp-segmentation-offload: off
+generic-receive-offload: off
+large-receive-offload: off [fixed]

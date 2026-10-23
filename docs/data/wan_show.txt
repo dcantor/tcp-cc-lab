@@ -1,0 +1,22 @@
+RTT_MS=30
+RATE_MBIT=100
+LOSS_PCT=0
+BUFFER_BDP=1
+ONE_WAY_US=15000
+QUEUE_BYTES=375000
+BDP_BYTES=375000
+APPLIED=1792729933
+--- eth1 (egress towards r1)
+qdisc netem 1: root refcnt 2 limit 1250 delay 15ms seed 17046640348788336126
+ Sent 315808004 bytes 1131418 pkt (dropped 2430, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+qdisc tbf 10: parent 1:1 rate 100Mbit burst 50000b lat 26ms 
+ Sent 315808004 bytes 1131418 pkt (dropped 2414, overlimits 1065125 requeues 0) 
+ backlog 0b 0p requeues 0
+--- eth2 (egress towards r2)
+qdisc netem 1: root refcnt 2 limit 1250 delay 15ms seed 19708122041511612
+ Sent 3822336636 bytes 2066958 pkt (dropped 17914, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+qdisc tbf 10: parent 1:1 rate 100Mbit burst 50000b lat 26ms 
+ Sent 3822336636 bytes 2066958 pkt (dropped 17888, overlimits 11140795 requeues 0) 
+ backlog 0b 0p requeues 0

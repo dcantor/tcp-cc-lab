@@ -1,0 +1,7 @@
+{
+ "src": "a-cubic",
+ "dst": "b-cubic",
+ "min_ms": 30.731,
+ "avg_ms": 30.809,
+ "max_ms": 30.943
+}

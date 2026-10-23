@@ -1,0 +1,512 @@
+[
+ {
+  "host": "a-cubic",
+  "cc": "cubic",
+  "cc_reported": "cubic",
+  "mss": 1448,
+  "mbps": 94.74,
+  "sent_mbps": 96.88,
+  "retransmits": 140,
+  "rtt_ms": {
+   "mean": 51.8,
+   "min": 44.4,
+   "max": 59.3,
+   "p50_samples": 51.08
+  },
+  "error": null,
+  "samples": [
+   {
+    "t": 1,
+    "ts": 1792730546.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 122.55,
+    "rtt_ms": 57.45,
+    "cwnd": 696488,
+    "retr": 133
+   },
+   {
+    "t": 2,
+    "ts": 1792730547.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 87.03,
+    "rtt_ms": 44.4,
+    "cwnd": 535760,
+    "retr": 3
+   },
+   {
+    "t": 3,
+    "ts": 1792730548.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 101.71,
+    "rtt_ms": 47.55,
+    "cwnd": 574856,
+    "retr": 0
+   },
+   {
+    "t": 4,
+    "ts": 1792730549.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 88.08,
+    "rtt_ms": 49.51,
+    "cwnd": 598024,
+    "retr": 0
+   },
+   {
+    "t": 5,
+    "ts": 1792730550.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 101.71,
+    "rtt_ms": 50.63,
+    "cwnd": 611056,
+    "retr": 0
+   },
+   {
+    "t": 6,
+    "ts": 1792730551.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 88.08,
+    "rtt_ms": 50.91,
+    "cwnd": 615400,
+    "retr": 0
+   },
+   {
+    "t": 7,
+    "ts": 1792730552.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 101.71,
+    "rtt_ms": 51.08,
+    "cwnd": 615400,
+    "retr": 0
+   },
+   {
+    "t": 8,
+    "ts": 1792730553.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 102.76,
+    "rtt_ms": 50.96,
+    "cwnd": 615400,
+    "retr": 0
+   },
+   {
+    "t": 9,
+    "ts": 1792730554.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 87.03,
+    "rtt_ms": 51.14,
+    "cwnd": 622640,
+    "retr": 0
+   },
+   {
+    "t": 10,
+    "ts": 1792730555.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 102.76,
+    "rtt_ms": 52.79,
+    "cwnd": 638568,
+    "retr": 0
+   },
+   {
+    "t": 11,
+    "ts": 1792730556.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 87.03,
+    "rtt_ms": 54.1,
+    "cwnd": 653048,
+    "retr": 0
+   },
+   {
+    "t": 12,
+    "ts": 1792730557.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 102.76,
+    "rtt_ms": 56.26,
+    "cwnd": 680560,
+    "retr": 0
+   },
+   {
+    "t": 13,
+    "ts": 1792730558.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 87.03,
+    "rtt_ms": 59.3,
+    "cwnd": 637120,
+    "retr": 1
+   },
+   {
+    "t": 14,
+    "ts": 1792730559.46,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 105.91,
+    "rtt_ms": 47.91,
+    "cwnd": 580648,
+    "retr": 3
+   },
+   {
+    "t": 15,
+    "ts": 1792730560.57,
+    "cc": "cubic",
+    "host": "a-cubic",
+    "mbps": 87.02,
+    "rtt_ms": 53.0,
+    "cwnd": 640016,
+    "retr": 0
+   }
+  ],
+  "drops": 140,
+  "bytes_per_packet": 1514
+ },
+ {
+  "host": "a-bbr",
+  "cc": "bbr",
+  "cc_reported": "bbr",
+  "mss": 1448,
+  "mbps": 93.09,
+  "sent_mbps": 98.14,
+  "retransmits": 1272,
+  "rtt_ms": {
+   "mean": 43.69,
+   "min": 32.53,
+   "max": 60.71,
+   "p50_samples": 42.63
+  },
+  "error": null,
+  "samples": [
+   {
+    "t": 1,
+    "ts": 1792730564.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 167.6,
+    "rtt_ms": 60.46,
+    "cwnd": 792056,
+    "retr": 840
+   },
+   {
+    "t": 2,
+    "ts": 1792730565.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 93.35,
+    "rtt_ms": 47.72,
+    "cwnd": 799296,
+    "retr": 131
+   },
+   {
+    "t": 3,
+    "ts": 1792730566.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 92.27,
+    "rtt_ms": 42.63,
+    "cwnd": 813776,
+    "retr": 0
+   },
+   {
+    "t": 4,
+    "ts": 1792730567.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 92.25,
+    "rtt_ms": 52.17,
+    "cwnd": 787712,
+    "retr": 0
+   },
+   {
+    "t": 5,
+    "ts": 1792730568.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 92.31,
+    "rtt_ms": 46.24,
+    "cwnd": 842736,
+    "retr": 0
+   },
+   {
+    "t": 6,
+    "ts": 1792730569.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 92.22,
+    "rtt_ms": 36.72,
+    "cwnd": 819568,
+    "retr": 0
+   },
+   {
+    "t": 7,
+    "ts": 1792730570.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 92.33,
+    "rtt_ms": 32.92,
+    "cwnd": 793504,
+    "retr": 0
+   },
+   {
+    "t": 8,
+    "ts": 1792730571.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 93.27,
+    "rtt_ms": 36.62,
+    "cwnd": 793504,
+    "retr": 0
+   },
+   {
+    "t": 9,
+    "ts": 1792730572.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 92.27,
+    "rtt_ms": 32.53,
+    "cwnd": 773232,
+    "retr": 0
+   },
+   {
+    "t": 10,
+    "ts": 1792730573.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 123.75,
+    "rtt_ms": 32.79,
+    "cwnd": 776128,
+    "retr": 0
+   },
+   {
+    "t": 11,
+    "ts": 1792730574.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 62.91,
+    "rtt_ms": 35.55,
+    "cwnd": 863008,
+    "retr": 0
+   },
+   {
+    "t": 12,
+    "ts": 1792730575.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 97.56,
+    "rtt_ms": 60.71,
+    "cwnd": 825360,
+    "retr": 173
+   },
+   {
+    "t": 13,
+    "ts": 1792730576.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 93.36,
+    "rtt_ms": 54.47,
+    "cwnd": 784816,
+    "retr": 128
+   },
+   {
+    "t": 14,
+    "ts": 1792730577.11,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 93.28,
+    "rtt_ms": 47.35,
+    "cwnd": 776128,
+    "retr": 0
+   },
+   {
+    "t": 15,
+    "ts": 1792730578.18,
+    "cc": "bbr",
+    "host": "a-bbr",
+    "mbps": 93.35,
+    "rtt_ms": 36.44,
+    "cwnd": 776128,
+    "retr": 0
+   }
+  ],
+  "drops": 1272,
+  "bytes_per_packet": 1514
+ },
+ {
+  "host": "a-reno",
+  "cc": "reno",
+  "cc_reported": "reno",
+  "mss": 1448,
+  "mbps": 94.53,
+  "sent_mbps": 97.86,
+  "retransmits": 519,
+  "rtt_ms": {
+   "mean": 43.04,
+   "min": 30.65,
+   "max": 58.56,
+   "p50_samples": 41.59
+  },
+  "error": null,
+  "samples": [
+   {
+    "t": 1,
+    "ts": 1792730581.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 130.91,
+    "rtt_ms": 32.01,
+    "cwnd": 389512,
+    "retr": 517
+   },
+   {
+    "t": 2,
+    "ts": 1792730582.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 93.32,
+    "rtt_ms": 35.58,
+    "cwnd": 431504,
+    "retr": 0
+   },
+   {
+    "t": 3,
+    "ts": 1792730583.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 94.37,
+    "rtt_ms": 38.84,
+    "cwnd": 470600,
+    "retr": 0
+   },
+   {
+    "t": 4,
+    "ts": 1792730584.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 117.44,
+    "rtt_ms": 41.59,
+    "cwnd": 505352,
+    "retr": 0
+   },
+   {
+    "t": 5,
+    "ts": 1792730585.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 93.32,
+    "rtt_ms": 44.36,
+    "cwnd": 538656,
+    "retr": 0
+   },
+   {
+    "t": 6,
+    "ts": 1792730586.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 94.37,
+    "rtt_ms": 47.02,
+    "cwnd": 569064,
+    "retr": 0
+   },
+   {
+    "t": 7,
+    "ts": 1792730587.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 93.32,
+    "rtt_ms": 49.47,
+    "cwnd": 599472,
+    "retr": 0
+   },
+   {
+    "t": 8,
+    "ts": 1792730588.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 94.37,
+    "rtt_ms": 52.17,
+    "cwnd": 626984,
+    "retr": 0
+   },
+   {
+    "t": 9,
+    "ts": 1792730589.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 93.32,
+    "rtt_ms": 54.13,
+    "cwnd": 653048,
+    "retr": 0
+   },
+   {
+    "t": 10,
+    "ts": 1792730590.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 94.37,
+    "rtt_ms": 56.22,
+    "cwnd": 679112,
+    "retr": 0
+   },
+   {
+    "t": 11,
+    "ts": 1792730591.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 93.33,
+    "rtt_ms": 58.56,
+    "cwnd": 705176,
+    "retr": 0
+   },
+   {
+    "t": 12,
+    "ts": 1792730592.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 94.37,
+    "rtt_ms": 30.65,
+    "cwnd": 369240,
+    "retr": 2
+   },
+   {
+    "t": 13,
+    "ts": 1792730593.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 93.33,
+    "rtt_ms": 34.32,
+    "cwnd": 412680,
+    "retr": 0
+   },
+   {
+    "t": 14,
+    "ts": 1792730594.72,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 94.37,
+    "rtt_ms": 35.46,
+    "cwnd": 451776,
+    "retr": 0
+   },
+   {
+    "t": 15,
+    "ts": 1792730595.79,
+    "cc": "reno",
+    "host": "a-reno",
+    "mbps": 93.32,
+    "rtt_ms": 35.17,
+    "cwnd": 489424,
+    "retr": 0
+   }
+  ],
+  "drops": 519,
+  "bytes_per_packet": 1514
+ }
+]

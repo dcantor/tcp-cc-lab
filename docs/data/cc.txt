@@ -1,0 +1,6 @@
+a-cubic  cc cubic  (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+a-bbr    cc bbr    (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+a-reno   cc reno   (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+b-cubic  cc cubic  (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+b-bbr    cc bbr    (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
+b-reno   cc reno   (available: reno cubic bbr)  mtu 1500  qdisc eth1: fq  iperf3: up
