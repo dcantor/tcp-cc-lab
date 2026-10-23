@@ -12,8 +12,16 @@ All notable changes to this lab are documented here ([Keep a Changelog](https://
   - **Contents and executive summary**, with key findings worked out from the data: the leader and its ratios, sharing
     (compete), queueing delay above the path RTT, retransmits, throughput before and after each change, and system
     load.
-  - **Numbered chapters:** 1 Test environment, 2 Methodology, 3 Results, 4 System load, 5 Conclusions (with caveats on
-    reading a single run), then appendices A (device configurations) and B (run log).
+  - **Numbered chapters:** 1 Background, 2 Test environment, 3 Methodology, 4 Results, 5 System load, 6 Conclusions
+    (with caveats on reading a single run), then appendices A (device configurations) and B (run log).
+  - **Chapter 1, "Background: Reno, CUBIC and BBR"** (`webapp/report_background.py`):
+    - the problem congestion control solves: bottleneck, buffer, RTT, cwnd, BDP;
+    - each algorithm's history and mechanism: Reno's slow start and AIMD; CUBIC's W(t) = C(t − K)³ + Wmax with β = 0.7;
+      BBR's BtlBw / RTprop model, pacing and its Startup, Drain, ProbeBW and ProbeRTT phases (BBR v1 versus v2/v3);
+    - a schematic of how each one's window evolves, and a side-by-side comparison table;
+    - worked numbers for the run's own path: the BDP, Reno's regrowth time after one loss, CUBIC's K and BBR's Startup
+      time;
+    - for each loss rate used in the run, the Mathis estimate of Reno's throughput next to what Reno measured.
   - **Numbered figures and tables**, with captions.
   - **New table:** mean throughput and RTT in each phase of the run, between one change and the next.
   - The appendix flows rather than starting each device on a new page, so the report is shorter.

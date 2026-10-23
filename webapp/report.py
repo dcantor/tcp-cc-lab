@@ -10,6 +10,8 @@ import time
 from html import escape as E
 from pathlib import Path
 
+import report_background
+
 LABEL = {"cubic": "CUBIC", "bbr": "BBR", "reno": "Reno"}
 COL = {"cubic": "#2a78d6", "bbr": "#eb6834", "reno": "#1baf7a", "q": "#b45309", "wanem": "#b45309", "r1": "#6b6a65", "r2": "#6b6a65"}
 for _a in ("cubic", "bbr", "reno"): COL["a-" + _a] = COL["b-" + _a] = COL[_a]
@@ -310,7 +312,7 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     else:
         summary = (f"The flows ran together for {res.get('seconds', 0):g} s, starting with {wtxt} and "
                    + (f"a sender bit rate of {br:g} Mbit/s per flow. " if br else "no sender bit-rate limit. ")
-                   + (f"{len(mk)} change{'s were' if len(mk) != 1 else ' was'} made while they ran (section 2). " if mk else "Nothing was changed while they ran. ")
+                   + (f"{len(mk)} change{'s were' if len(mk) != 1 else ' was'} made while they ran (section 3). " if mk else "Nothing was changed while they ran. ")
                    + "Averaged over the run (time-weighted across the flows' segments): " + ", ".join(f"{ln(a)} {fmt(v)} Mbit/s" for a, v in rank) + ".")
     if run.get("error"): summary += f" The run ended with an error: {run['error']}."
 
@@ -366,7 +368,7 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     app_a = ""
     if cfg:
         app_a = (f"<h2 class='page'>Appendix A. Device configurations</h2><p class='note'>Collected from each device over SSH when this report was made ({time.strftime('%Y-%m-%d %H:%M')}), after the run. "
-                 "The WAN emulator therefore shows its settings at that moment; the settings during the run are in section 2. VyOS password hashes are redacted.</p>")
+                 "The WAN emulator therefore shows its settings at that moment; the settings during the run are in section 3. VyOS password hashes are redacted.</p>")
         for k, n in enumerate([n for name in NODE_ORDER for n in (inv or {}).get("nodes", []) if n["name"] == name]):
             secs = cfg.get(n["name"], [])
             if n["role"] == "host" and n["name"] != "a-cubic" and ref and not diffs:   # verified identical: print the list once (A.1)
@@ -427,15 +429,18 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
         memx = max(((n, max(x[2] / x[3] for x in win[n] if x[3])) for n in nodes), key=lambda x: x[1])
         find.append(f"<b>System load:</b> the busiest node was {busy[0]}, at {fmt(busy[1])} % CPU at its peak; the fullest memory was {memx[0]}'s, at {100 * memx[1]:.0f} % of its RAM.")
     findings = "<ul>" + "".join(f"<li>{f_}</li>" for f_ in find) + "</ul>"
+    states, cur = [dict(wan0)], dict(wan0)   # the WAN in each phase (for chapter 1's loss table)
+    for m in marks: cur.update({k: v for k, v in m.items() if k != "ts"}); states.append(dict(cur))
+    reno_ph = [row["reno"][0] if "reno" in row else None for _, _, _, row in phases]
 
     # ---- figure / table numbering
     fig_n, tbl_n = [0], [0]
     def figure(svg, title, text):
         fig_n[0] += 1
-        return f"<div class='fig'>{svg}<div class='cap'><b>Figure {fig_n[0]}.</b> {title}. {text}</div></div>"
+        return f"<div class='fig'>{svg}<div class='cap'><b>Figure {fig_n[0]}.</b> {title}. {text.rstrip('.')}.</div></div>"
     def table(html_, title, text=""):
         tbl_n[0] += 1
-        return f"<div class='tbl'>{html_}<div class='cap'><b>Table {tbl_n[0]}.</b> {title}.{(' ' + text) if text else ''}</div></div>"
+        return f"<div class='tbl'>{html_}<div class='cap'><b>Table {tbl_n[0]}.</b> {title}.{(' ' + text.rstrip('.') + '.') if text else ''}</div></div>"
 
     title = {"compete": "Three Algorithms, One Bottleneck", "solo": "Each Algorithm Alone", "live": "Congestion Control Under Changing Conditions"}[mode]
     kicker = {"compete": "Flow test · compete", "solo": "Flow test · solo", "live": "Flow test · live"}[mode]
@@ -449,12 +454,14 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
 <div class='meta'>Run <span class='mono'>{E(run['id'])}</span> · {E(run['status'])} · {time.strftime('%H:%M:%S', time.localtime(started))}–{time.strftime('%H:%M:%S', time.localtime(finished))} ({finished - started:.0f} s)<br>
 libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Linux'}) · {E(iperf[0].split(' (')[0]) if iperf else 'iperf3'}<br>tcp-cc-lab {E(lab_version)} · github.com/dcantor/tcp-cc-lab</div></div></section>"""
 
-    chapters = [("1", "Test environment"), ("2", "Methodology"), ("3", "Results"), ("4", "System load"), ("5", "Conclusions")] + \
+    chapters = [("1", "Background: Reno, CUBIC and BBR"), ("2", "Test environment"), ("3", "Methodology"), ("4", "Results"), ("5", "System load"), ("6", "Conclusions")] + \
                ([("A", "Appendix: device configurations")] if cfg else []) + [("B", "Appendix: run log")]
     toc = "<div class='toc'>" + "".join(f"<div><span class='n'>{n_}</span>{E(t)}</div>" for n_, t in chapters) + "</div>"
     h2 = lambda n_, t, first=False: f"<h2><span class='n'>{n_}</span>{E(t)}</h2>"   # noqa: E731
 
-    # chapter 1: the environment (from lab_html, with numbered figure and tables)
+    # chapter 1: background, built first so its figure and tables take the first numbers
+    bg = report_background.chapter(wan0, res.get("host_mtu"), algos, states[:len(phases)], reno_ph, figure, table)
+    # chapter 2: the environment (from lab_html, with numbered figure and tables)
     env = lab_html.replace("<h2>2. The lab</h2>", "")
     env = env.replace(f"<div class='fig'>{topo_svg(inv, wan0)}</div>", figure(topo_svg(inv, wan0), "The lab", f"Three hosts per site, one per algorithm, joined through r1, wanem and r2. wanem shows the WAN as the run started."))
     env = re.sub(r"(<table><tr><th>Node</th>.*?</table>)", lambda m_: table(m_.group(1), "The nodes", "vCPU and RAM as each node reports them."), env, count=1, flags=re.S)
@@ -484,11 +491,12 @@ libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Lin
     body = f"""{cover}
 <h2>Contents</h2>{toc}
 <h2>Executive summary</h2><div class='kpis'>{kpis}</div><p>{E(summary)}</p><div class='box'><div class='h'>Key findings</div>{findings}</div>
-<section class='chapter'>{h2('1', 'Test environment')}{env}</section>
-<section class='chapter'>{h2('2', 'Methodology')}{meth}</section>
-<section class='chapter'>{h2('3', 'Results')}{res_html}</section>
-<section class='chapter'>{h2('4', 'System load')}<p>Each node's own /proc/stat and /proc/meminfo, sampled once a second over one SSH session per node. CPU is a percentage of the node's vCPUs.</p>{load}</section>
-<section class='chapter'>{h2('5', 'Conclusions')}{concl}</section>
+<section class='chapter'>{h2('1', 'Background: Reno, CUBIC and BBR')}{bg}</section>
+<section class='chapter'>{h2('2', 'Test environment')}{env}</section>
+<section class='chapter'>{h2('3', 'Methodology')}{meth}</section>
+<section class='chapter'>{h2('4', 'Results')}{res_html}</section>
+<section class='chapter'>{h2('5', 'System load')}<p>Each node's own /proc/stat and /proc/meminfo, sampled once a second over one SSH session per node. CPU is a percentage of the node's vCPUs.</p>{load}</section>
+<section class='chapter'>{h2('6', 'Conclusions')}{concl}</section>
 {app_a.replace("<h2 class='page'>Appendix A. Device configurations</h2>", "<section class='chapter'>" + h2('A', 'Appendix: device configurations')) + '</section>' if app_a else ''}
 <section class='chapter'>{h2('B', 'Appendix: run log')}{app_b.replace("<h2 class='page'>Appendix B. Run log</h2>", "")}</section>"""
     css = CSS.replace("%(runid)s", run["id"]).replace("%(version)s", lab_version).replace("%(author)s", author)
