@@ -10,6 +10,7 @@ import time
 from html import escape as E
 from pathlib import Path
 
+import report_analysis
 import report_background
 
 LABEL = {"cubic": "CUBIC", "bbr": "BBR", "reno": "Reno"}
@@ -124,6 +125,7 @@ h1, h2, h3, .serif { font-family: "Noto Serif", "Liberation Serif", Georgia, ser
 h2 { font-size: 16pt; font-weight: 700; margin: 0 0 8pt; padding-bottom: 4pt; border-bottom: 2px solid var(--accent); break-after: avoid; }
 h2 .n { color: var(--accent); margin-right: 8pt; }
 h3 { font-size: 12pt; margin: 14pt 0 4pt; break-after: avoid; }
+h2.sub { font-size: 13.5pt; margin-top: 18pt; break-before: page; border-bottom-width: 1px; }
 h4 { font: 600 9.4pt "Noto Sans", sans-serif; margin: 8pt 0 2pt; color: #334155; break-after: avoid; }
 p { margin: 5pt 0; text-align: justify; hyphens: auto; } ul, ol { margin: 4pt 0 6pt; padding-left: 18pt; } li { margin: 2.5pt 0; }
 .mono, code { font-family: "DejaVu Sans Mono", ui-monospace, monospace; font-size: 8.5pt; } code { background: var(--code); padding: 0 3px; border-radius: 3px; }
@@ -145,6 +147,7 @@ table.kv th { width: 24%; background: none; border-top: 0; border-bottom: 1px so
 .box { border: 1px solid var(--line); border-left: 4px solid var(--accent); background: #f8fafc; padding: 8pt 12pt; border-radius: 3px; margin: 8pt 0; break-inside: avoid; }
 .box .h { font-weight: 700; font-size: 8.4pt; letter-spacing: .14em; text-transform: uppercase; color: var(--head); margin-bottom: 3pt; }
 .box ul { margin: 2pt 0 0; } .box p { margin: 2pt 0; }
+.phase { border-left: 3px solid var(--line); padding: 2pt 0 2pt 10pt; margin: 8pt 0; break-inside: avoid; } .phase h4 { margin: 0 0 2pt; font-size: 10pt; } .phase p { margin: 2pt 0; }
 /* the cover, as the walkthrough white paper */
 .cover { height: 236mm; display: flex; flex-direction: column; justify-content: space-between; break-after: page; }
 .cover .top { border-top: 5pt solid var(--head); padding-top: 8pt; display: flex; justify-content: space-between; align-items: baseline; }
@@ -474,6 +477,14 @@ libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Lin
     res_main = re.sub(r"^(<table>.*?</table>)", lambda m_: table(m_.group(1), "Results per flow"), res_tbl, count=1, flags=re.S)
     res_html = res_main + (table(ph_tbl, "Mean throughput and RTT in each phase", "A phase runs from one change to the next; means of the per-second samples.") if ph_tbl else "")
     res_html += "<h3>Per second</h3>" + legend(algos) + "".join(figure(c, t, s_[0].upper() + s_[1:]) for t, s_, c in figs)
+    cw = [(a, LABEL[a], [(s_["ts"] - t0, s_["cwnd"] / 1e6) for s_ in per[a] if s_.get("cwnd")]) for a in algos]
+    ana, ana_find = report_analysis.chapter(dict(algos=algos, per=per, wans=wans, mk=mk, phases=phases, states=states, wan0=wan0, res=res, br=br, mode=mode,
+                                                 mtu=mtu, t0=t0, xmax=xmax, figure=figure, table=table, chart=chart, cwnd_series=cw if any(x[2] for x in cw) else None))
+    res_html += "<h2 class='sub'>Analysis: what the results mean</h2>" + ana
+    find[1:1] = ana_find
+    if len({st_.get("rtt_ms") for st_ in states}) > 1 or any(f_.startswith("<b>The bottleneck buffer filled") for f_ in ana_find):   # the analysis has the per-phase figure
+        find = [f_ for f_ in find if not f_.startswith("<b>Queueing delay:")]
+    findings = "<ul>" + "".join(f"<li>{f_}</li>" for f_ in find) + "</ul>"
     # chapter 4: system load
     load = nodes_html.replace("<div class='fig'><h2>Nodes during the run</h2>", "<div>").replace("<h2>Nodes during the run</h2>", "")
     load = re.sub(r"(<table><tr><th>Node</th><th class='num'>CPU mean</th>.*?</table>)", lambda m_: table(m_.group(1), "CPU and memory per node during the run"), load, count=1, flags=re.S)

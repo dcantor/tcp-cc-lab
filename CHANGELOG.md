@@ -2,6 +2,35 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.10.0] - 2026-10-23
+
+### Added
+- **The PDF report explains its results.** Chapter 4 has a new section, "Analysis: what the results mean"
+  (`webapp/report_analysis.py`). It works everything out from the run's own data:
+  - **What limited each flow:** each flow's mean against the tightest limit (-b, the bottleneck, the VMs' forwarding
+    ceiling), with a verdict: application-, bottleneck-, competition-, path- or loss-limited.
+  - **Where the losses came from:** the random loss expected from what was set in each phase, the bottleneck's
+    overflow drops and the VMs' receive drops, set against the flows' retransmits. Per flow: retransmit rate and how
+    bursty the losses were. It also explains why BBR retransmits more.
+  - **Throughput against the loss models:** the loss-event rate that Mathis (Reno) and RFC 9438 (CUBIC) imply from
+    the measured throughput, next to the random loss met and the retransmit rate. Bursty losses and Reno's slow
+    regrowth are explained.
+  - **Queueing delay:** each flow's RTT above the RTT set in each phase, and the bottleneck queue against its buffer.
+  - **Dynamics:**
+    - start-up, variation, back-offs and recovery time, against what Reno's AIMD and CUBIC's K predict;
+    - BBR's ProbeRTT dips and back-offs after a change;
+    - window against need;
+    - a new congestion-window figure.
+  - **Phase by phase:** for each change, each flow's mean before and after, its settling time, what the
+    algorithms' design predicts, and whether the result matched.
+  - **Sharing:** shares, Jain's index, the role of buffer depth, the windows that explain a squeezed flow, and BBR v1's
+    behaviour in shallow buffers.
+  - New key findings from the analysis.
+- **Runs record the VMs' receive drops** (`result.path_drops`). These are packets the physical host's tap devices
+  dropped because a VM did not take them off its virtio ring in time. The emulator's counters never see these
+  losses, and at high rates they can be most of the losses on the path.
+- The README lists all the report's chapters, including chapter 1 (background).
+
 ## [0.9.0] - 2026-10-23
 
 ### Changed

@@ -114,6 +114,25 @@ def mtu(fresh=False):
     return _mtu["v"]
 
 
+def path_drops():
+    """Packets the physical host's tap devices dropped on their way into each VM on a data network (tx_dropped: the VM did not
+    take them off its virtio ring in time). Losses outside the emulator, which tbf's and netem's counters never see. {"<vm> from <net>": n}"""
+    out = {}
+    for n in pdfreport.NODE_ORDER:
+        try: rows = subprocess.run(["virsh", "-c", "qemu:///system", "domiflist", f"tcpcc-{n}"], capture_output=True, text=True, timeout=5).stdout.splitlines()[2:]
+        except Exception: continue   # noqa: BLE001
+        for r in rows:
+            f = r.split()
+            if len(f) >= 3 and f[2] != "tcpcc-oob":
+                try: out[f"{n} from {f[2].removeprefix('tcpcc-')}"] = int(Path(f"/sys/class/net/{f[0]}/statistics/tx_dropped").read_text())
+                except (OSError, ValueError): pass
+    return out
+
+
+def drops_since(d0):
+    d1 = path_drops(); return {k: d1[k] - d0[k] for k in d1 if k in d0 and d1[k] >= d0[k]}
+
+
 def live_flows():
     """While a compete / solo run goes: each algorithm's last per-second sample (from the run's SAMPLE lines, at most 5 s old)."""
     a = active_run()
@@ -377,10 +396,12 @@ class Run(RunBase):
         o = self.options; out = RUNS_DIR / f"{self.id}.flows.json"
         args = f"{self.mode} --duration {int(o['duration'])} --direction {o['direction']} --algos {','.join(o['algos'])} --stagger {float(o.get('stagger') or 0)}"
         if o.get("bitrate_mbit"): args += f" --bitrate {o['bitrate_mbit']:g}M"
+        d0 = path_drops()
         rc = self.sh(["bash", "-c", f'python3 "{LAB}/tools/cclab.py" {args} > "{out}"'], check=False)
         try: self.result = json.loads(out.read_text()); out.unlink()
         except Exception: self.result = None   # noqa: BLE001
         if self.result:
+            self.result["path_drops"] = drops_since(d0)
             fl = self.result["flows"]
             s["summary"] = "; ".join(f"{f['cc']} {f['mbps']} Mbit/s" for f in fl) + (f"; Jain {self.result['jain_fairness']}" if self.result.get("jain_fairness") else "")
         if rc: raise RuntimeError(f"flows failed (rc={rc})" + (f": {s['summary']}" if s["summary"] else ""))
@@ -407,7 +428,7 @@ class Run(RunBase):
                              "mbps": round(sum(x["mbps"] for x in sm) / len(sm), 2) if sm else 0, "retransmits": sum(x["retr"] for x in sm),
                              "rtt_ms": {"min": min(rt, default=0), "mean": round(sum(rt) / len(rt), 2) if rt else 0, "max": max(rt, default=0)},
                              "error": None if "interrupt" in (f.error or "") else f.error})
-        w0 = wan(fresh=True); self.say("START " + json.dumps({"ts": round(t0, 2), **{k: (w0.get("settings") or {}).get(k) for k in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}, "bitrate_mbit": self.ctl["bitrate"]}))
+        d0 = path_drops(); w0 = wan(fresh=True); self.say("START " + json.dumps({"ts": round(t0, 2), **{k: (w0.get("settings") or {}).get(k) for k in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}, "bitrate_mbit": self.ctl["bitrate"]}))
         fs = start(self.ctl["bitrate"]); br = self.ctl["bitrate"]
         def flush(fs):
             for f in fs:
@@ -432,7 +453,7 @@ class Run(RunBase):
             time.sleep(0.25)
         stop(fs); flush(fs)
         self.result = {"mode": "live", "direction": o["direction"], "algos": o["algos"], "wan": w0.get("settings"), "host_mtu": (mtu() or {}).get("host_mtu"),
-                       "seconds": round(time.time() - t0, 1), "segments": segs}
+                       "seconds": round(time.time() - t0, 1), "segments": segs, "path_drops": drops_since(d0)}
         s["summary"] = f"{self.result['seconds']} s, {len(segs) // max(1, len(hs))} bit-rate segment(s)"
         bad = [g for g in segs if g["error"]]
         if bad: raise RuntimeError("; ".join(f"{g['cc']}: {g['error']}" for g in bad)[:300])

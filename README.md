@@ -44,11 +44,15 @@ own window slider and a history slider under each chart. Untick a node to hide i
 **PDF report**: when a compete, solo or live run has finished, the Flows card's "⤓ PDF report" button downloads a
 report of the run shown (`GET /api/runs/<id>/report.pdf`), styled as a white paper like the walkthrough. It opens with a
 title page, contents and an executive summary with key findings, then:
-1. the test environment;
-2. the methodology, with every change made during the run;
-3. the results, with per-second charts and a table for each phase between changes;
-4. the system load: each node's CPU and memory during the run;
-5. conclusions.
+1. background: what Reno, CUBIC and BBR are, worked out for the run's path;
+2. the test environment;
+3. the methodology, with every change made during the run;
+4. the results, with per-second charts, a table for each phase between changes, and an analysis of what they mean:
+   what limited each flow, where the losses came from (random loss, bottleneck overflow, the VMs' receive drops),
+   throughput against the loss models, queueing delay, start-up / back-off / recovery against each algorithm's
+   design, a phase-by-phase account of each change, and how the flows shared the link;
+5. the system load: each node's CPU and memory during the run;
+6. conclusions.
 
 Appendix A has every device's configuration, collected live; appendix B has the run's log.
 
