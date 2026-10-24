@@ -55,7 +55,7 @@ title page, contents and an executive summary with key findings, then:
 6. conclusions.
 
 Appendices: A, the device configurations; B, the run log; C, the repository and a numbered list of references
-(RFCs, papers and tool documentation), which the text cites as [n].
+(RFCs, papers and tool documentation), which the text cites as [n]; D, a screenshot of the portal showing the run.
 
 Appendix A has every device's configuration, collected live; appendix B has the run's log.
 

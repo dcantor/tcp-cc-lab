@@ -36,6 +36,7 @@ sys.path.insert(0, str(LAB / "tools"))
 import cclab as C  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import report as pdfreport  # noqa: E402  (app.py already has a report() endpoint)
+import report_shot  # noqa: E402
 
 NAME = "tcp-cc-lab"
 PORT = int(os.environ.get("WEBAPP_PORT", "8112"))
@@ -545,6 +546,29 @@ def start_run(req: RunRequest):
 _report_lock = threading.Lock()
 
 
+def portal_shot(d, out_png):
+    """The portal as it shows run d (finished): for the report's appendix D. None if it could not be made (the report goes on without it)."""
+    try:
+        import urllib.request
+        runs = json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/runs", timeout=20))
+        w = dict(wan()); log = d.get("log") or []
+        last = {k: v for k, v in ((d.get("result") or {}).get("wan") or {}).items() if k in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}   # the WAN as the run left it: as it started, then each MARK
+        for l in log:
+            if l["line"].startswith(("START ", "MARK ")):
+                try: last.update({k: v for k, v in json.loads(l["line"].split(" ", 1)[1]).items() if k in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")})
+                except ValueError: pass
+        if w.get("settings"):   # with what follows from them, as wanem.sh works it out (BDP; buffer = BUFFER x BDP, 36 kB .. 128 MB)
+            ws = {**w["settings"], **last}; bdp = ws["rate_mbit"] * 1e6 / 8 * ws["rtt_ms"] / 1000
+            ws.update(bdp_bytes=int(bdp), queue_bytes=int(min(134217728, max(36056, bdp * ws["buffer_bdp"]))), one_way_us=int(ws["rtt_ms"] * 500)); w["settings"] = ws
+        st = {**state(), "busy": False, "active": None, "active_mode": None, "at": d.get("finished") or time.time()}
+        ns = d.get("node_stats") or {}
+        stubs = {"/api/lab": lab(), "/api/state": st, "/api/runs": runs, "/api/wan": w,
+                 "/api/nodestats": {"now": d.get("finished") or time.time(), "nodes": {k: {"vcpus": (_stats.get(k) or {}).get("vcpus"), "samples": v} for k, v in ns.items()}}}
+        return report_shot.screenshot(stubs, {**d, "log_offset": 0}, out_png)
+    except Exception as e:   # noqa: BLE001
+        print(f"portal screenshot failed: {e}", file=sys.stderr); return None
+
+
 @app.get("/api/runs/{run_id}/report.pdf", tags=["runs"], summary="PDF report of a finished compete / solo / live run: setup, changes, per-second charts, results, nodes' CPU and memory")
 def run_report(run_id: str):
     d = registry.load(run_id)
@@ -558,9 +582,12 @@ def run_report(run_id: str):
             info = (f"Alpine Linux VMs, {a.get('vcpus') or '?'} vCPU and {round(last[3] / 1000, 1) if last else '?'} GB usable RAM each; fq on eth1; "
                     "the same sysctls on every host apart from the congestion control")
             inv = C.inventory(); configs = C._parallel(node_sections, [n["name"] for n in inv["nodes"]])   # appendix A: every device, live
+            shot = portal_shot(d, RUNS_DIR / f"{run_id}.portal.png")   # appendix D
             try: pdfreport.build_pdf(pdfreport.build_html(d, VERSION, {n: list(v["samples"]) for n, v in _stats.items()}, info,
-                                                          {k: v for k, v in inv.items() if k != "by_name"}, configs), out)
+                                                          {k: v for k, v in inv.items() if k != "by_name"}, configs, portal_png=shot), out)
             except Exception as e: raise HTTPException(500, f"report failed: {str(e)[:300]}")   # noqa: BLE001
+            finally:
+                if shot: Path(shot).unlink(missing_ok=True)
     return FileResponse(out, media_type="application/pdf", filename=f"tcp-cc-lab-{d['mode']}-{run_id}.pdf")
 
 

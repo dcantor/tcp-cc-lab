@@ -1,6 +1,7 @@
 """PDF report of one finished flow run (compete / solo / live): the setup, what changed during the run, per-second charts,
 the results, and the nodes' CPU and memory while it ran. Built as one HTML file (inline SVG) and printed to PDF by
 headless Chrome from a file:// URL (Chrome on this host hangs on http:// pages)."""
+import base64
 import json
 import re
 import shutil
@@ -165,6 +166,7 @@ table.kv th { width: 24%; background: none; border-top: 0; border-bottom: 1px so
 .cover .author .name { font: 700 15pt "Noto Serif", serif; color: var(--head); } .cover .author .date { font-size: 10.5pt; color: #334155; margin-top: 2pt; }
 a { color: var(--accent); text-decoration: none; } .cite { white-space: nowrap; } .cite a { color: var(--accent); }
 ol.refs { padding-left: 24pt; margin: 2pt 0 8pt; } ol.refs li { margin: 3pt 0; font-size: 9pt; line-height: 1.45; text-align: left; break-inside: avoid; } ol.refs li a { overflow-wrap: anywhere; }
+img.shot { width: 100%; border: 1px solid var(--line); border-radius: 4px; display: block; }
 .cover .meta { color: var(--mute); font-size: 8.3pt; line-height: 1.6; text-align: right; }
 .toc { columns: 2; column-gap: 14mm; font-size: 10pt; margin: 4pt 0 14pt; } .toc div { margin: 2pt 0; break-inside: avoid; } .toc .n { color: var(--accent); font-weight: 700; display: inline-block; width: 22pt; }
 /* appendix */
@@ -220,7 +222,7 @@ def section_text(configs, node, prefix):
 
 
 
-def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=None, author="Daniel Cantor"):
+def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=None, author="Daniel Cantor", portal_png=None):
     mode, o, res = run["mode"], run.get("options") or {}, run.get("result") or {}
     log = run.get("log") or []
     samples, wans, marks, start = lines(log, "SAMPLE"), lines(log, "WAN"), lines(log, "MARK"), (lines(log, "START") or [None])[0]
@@ -474,7 +476,7 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
 libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Linux'}) · {E(iperf[0].split(' (')[0]) if iperf else 'iperf3'}<br>tcp-cc-lab {E(lab_version)} · <a href='{report_references.REPO}'>github.com/dcantor/tcp-cc-lab</a></div></div></section>"""
 
     chapters = [("1", "Background: Reno, CUBIC and BBR"), ("2", "Test environment"), ("3", "Methodology"), ("4", "Results"), ("5", "System load"), ("6", "Conclusions")] + \
-               ([("A", "Appendix: device configurations")] if cfg else []) + [("B", "Appendix: run log"), ("C", "Appendix: repository and references")]
+               ([("A", "Appendix: device configurations")] if cfg else []) + [("B", "Appendix: run log"), ("C", "Appendix: repository and references")] + ([("D", "Appendix: the portal")] if portal_png else [])
     toc = "<div class='toc'>" + "".join(f"<div><span class='n'>{n_}</span>{E(t)}</div>" for n_, t in chapters) + "</div>"
     h2 = lambda n_, t, first=False: f"<h2><span class='n'>{n_}</span>{E(t)}</h2>"   # noqa: E731
 
@@ -530,6 +532,17 @@ libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Lin
 {app_a.replace("<h2 class='page'>Appendix A. Device configurations</h2>", "<section class='chapter'>" + h2('A', 'Appendix: device configurations')) + '</section>' if app_a else ''}
 <section class='chapter'>{h2('B', 'Appendix: run log')}{app_b.replace("<h2 class='page'>Appendix B. Run log</h2>", "")}</section>
 <section class='chapter'>{h2('C', 'Appendix: repository and references')}{report_references.appendix(lab_version)}</section>"""
+    if portal_png:
+        img = base64.b64encode(Path(portal_png).read_bytes()).decode()
+        body += (f"<section class='chapter'>{h2('D', 'Appendix: the portal')}"
+                 "<p>The lab is driven from a web portal (FastAPI, port 8112). This run was started and watched there; the screenshot shows the portal with this run opened, "
+                 "its charts zoomed out to the whole run. From the top: the <b>WAN emulator</b> card (RTT with the sweep checkbox, bottleneck rate, random loss, buffer, host MTU, "
+                 "and the bottleneck's live counters); the <b>topology</b>, where each device opens its configuration; and the <b>Flows</b> card, with the Live / Timed and "
+                 "Together / One at a time toggles, the sender bit rate, and the per-second throughput, RTT, retransmit and bottleneck-queue charts, each with its own slider "
+                 "to look back through the run. Below them (not shown) are the nodes' CPU and memory, the hosts, the tests and the list of runs.</p>"
+                 + figure(f"<img class='shot' alt='The tcp-cc-lab portal showing run {E(run['id'])}' src='data:image/png;base64,{img}'>", "The tcp-cc-lab portal",
+                          f"Run {E(run['id'])} opened in the portal, as it was when the run had finished; rendered from the portal's own page and data when this report was made")
+                 + "</section>")
     body = report_references.add_citations(body)
     css = CSS.replace("%(runid)s", run["id"]).replace("%(version)s", lab_version).replace("%(author)s", author)
     return f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{E(title)}: {E(subtitle)} · flow test {E(run['id'])}</title><style>{css}</style></head><body>{body}</body></html>"

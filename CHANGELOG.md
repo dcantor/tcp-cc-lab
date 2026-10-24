@@ -2,6 +2,21 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.15.0] - 2026-10-23
+
+### Added
+- **Appendix D, "The portal"**, in the PDF report: a screenshot of the portal with the report's run open, as it was
+  when the run finished. It shows:
+  - the WAN card with the run's settings;
+  - the Flows controls as the run was started: Live / Timed, Together / One at a time, the RTT sweep, duration,
+    direction, algorithms and bit rate;
+  - all four charts zoomed out to the whole run;
+  - the run's log and the list of recent runs.
+
+  A short tour of the portal goes with it. The screenshot is rendered from the portal's own page
+  (`webapp/report_shot.py`): a file:// copy whose API calls are answered from the portal's data, because Chrome on
+  this host hangs on http:// pages. If it cannot be made, the report is built without it.
+
 ## [0.14.0] - 2026-10-23
 
 ### Added
