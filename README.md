@@ -70,6 +70,9 @@ One at a time** sets whether the chosen algorithms share the bottleneck or each 
 | **Live** | `live`: until Stop (at most 2–30 min) | `live` with `sequential`: each for 30 s – 10 min; **Next ▸** moves on early |
 | **Timed** | `compete` (20–120 s) | `solo` (20–120 s each) |
 
+While a flow run goes, a **countdown** under the controls shows the time left, with a progress bar. For one-at-a-time
+runs it also shows the running algorithm's time left in its turn. The Run card shows the elapsed time of any run.
+
 **Live test** (the portal's default flow mode): the chosen algorithms run until you press Stop. Together, they run at
 once (at most 2–30 min). One at a time, each runs alone for the time set, and the run ends after the last. The WAN and
 bit-rate controls act on whichever flow is running, and the charts mark where each algorithm starts. Four charts update every second, with a time grid every 5 s: throughput,

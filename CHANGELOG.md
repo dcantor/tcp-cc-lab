@@ -2,6 +2,25 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.12.0] - 2026-10-23
+
+### Added
+- **Countdown timer** on the Flows card while a run goes, with a progress bar for the whole run:
+  - **Live, together:** the time until the test stops by itself (its "stop after" limit), or until you press Stop.
+  - **Live, one at a time:** the time left in the run, and the running algorithm's time left in its turn
+    (Next resets it).
+  - **Compete:** the time left, from when the flows actually started (setting them up is not counted).
+  - **Solo:** the time left, and the running algorithm's time left in its turn.
+  - It uses the portal's clock (`/api/state` `at`), so a browser on another machine with a skewed clock still counts
+    down correctly. It shows "finishing…" while the run wraps up.
+- **Elapsed time** (⏱) next to the Run card's title for any run that is going, including Verify and the Robot tests,
+  whose length isn't known in advance.
+
+### Changed
+- While a compete or solo run goes, the Flows card's toggles show how it is running (Timed, together or one at a
+  time), as they already did for live tests.
+- The "now: BBR (2 of 3)" label next to Next is gone; the countdown line shows the running algorithm instead.
+
 ## [0.11.0] - 2026-10-23
 
 ### Added

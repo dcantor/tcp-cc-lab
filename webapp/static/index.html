@@ -37,6 +37,9 @@ input[type=number] { width:84px; padding:4px 6px; }
 button { cursor:pointer; } button.primary { background:var(--accent); border-color:var(--accent); color:#fff; } button:disabled { opacity:.5; cursor:default; }
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .seg { display:inline-flex; border:1px solid var(--edge); border-radius:6px; overflow:hidden; } .seg button { border:0; border-radius:0; border-right:1px solid var(--edge); padding:4px 10px; font-size:13px; }
+.cdown { display:flex; align-items:center; gap:12px; margin-top:10px; } .cdown .t { font:600 22px/1 ui-monospace, "DejaVu Sans Mono", monospace; font-variant-numeric:tabular-nums; }
+.cdown .bar { flex:1; height:6px; border-radius:3px; background:var(--grid); overflow:hidden; min-width:80px; } .cdown .bar i { display:block; height:100%; background:var(--accent); transition:width .25s linear; }
+.cdown .sub { color:var(--mute); font-size:13px; } .cdown .t2 { font:600 15px ui-monospace, "DejaVu Sans Mono", monospace; font-variant-numeric:tabular-nums; }
 .seg button:last-child { border-right:0; } .seg button.on { background:var(--accent); color:#fff; }
 .steps { list-style:none; padding:0; margin:6px 0 0; } .steps li { padding:2px 0; } .steps .st { display:inline-block; width:62px; }
 .st.success { color:var(--ok); } .st.failed { color:var(--bad); } .st.running { color:var(--accent); } .st.pending, .st.skipped { color:var(--mute); }
@@ -130,6 +133,7 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
         <button id="nextBtn" style="display:none" title="end this algorithm's flow now and start the next one's">Next ▸</button><span id="seqNow" class="small"></span>
         <button id="pdfBtn" disabled title="a PDF of the run shown below: setup, changes, per-second charts, results, nodes' CPU and memory (once the run has finished)">⤓ PDF report</button><span id="pdfMsg" class="small"></span>
       </div>
+      <div class="cdown" id="cdown" style="display:none" role="timer" aria-live="off"><span class="t" id="cdT"></span><span class="sub" id="cdSub"></span><div class="bar" title="time used"><i id="cdBar"></i></div><span class="sub" id="cdSeg"></span></div>
       <div class="ctl" style="margin-top:12px">
         <label for="br">Sender bit rate <span class="small">(iperf3 -b, per flow)</span></label>
         <input type="range" id="br" min="0" max="22" step="1" value="11" aria-describedby="brVal">
@@ -182,7 +186,7 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
       <div id="tests" class="small"></div>
     </section>
     <section class="card">
-      <h2>Run</h2>
+      <h2>Run <span class="pill" id="runClock" style="display:none" title="time since the run started"></span></h2>
       <div id="run" class="small"><span class="mute">No run started from this page yet.</span></div>
       <h2 style="margin-top:14px">Recent runs</h2>
       <table id="runs" class="small"></table>
@@ -488,7 +492,7 @@ async function runsTable() {
 
 async function refresh() {
   try {
-    STATE = await api('/api/state');
+    const t1 = Date.now() / 1000; STATE = await api('/api/state'); CLOCK_OFF = STATE.at - (t1 + Date.now() / 1000) / 2;
     $('#upPill').textContent = STATE.all_up ? 'lab running' : STATE.up ? 'partly running' : 'lab off';
     $('#upPill').className = 'pill ' + (STATE.all_up ? 'ok' : 'bad');
     $('#busyPill').style.display = STATE.busy ? '' : 'none';
@@ -544,12 +548,13 @@ $('#pdfBtn').onclick = async () => {
 function goButton() {
   const g = liveGoing(); $('#goBtn').textContent = g ? 'Stop' : 'Start'; $('#goBtn').classList.toggle('primary', !g);
   const sq = g && RUN.options?.sequential; $('#nextBtn').style.display = sq ? '' : 'none';
-  if (g && (KIND !== 'live' || SEQ !== !!sq)) { KIND = 'live'; SEQ = !!sq; setMode(); }   // the toggles show how the running test runs
+  const fr = RUN && ['queued', 'running'].includes(RUN.status) && ['live', 'compete', 'solo'].includes(RUN.mode);   // the toggles show how the running test runs
+  if (fr) { const k = RUN.mode === 'live' ? 'live' : 'timed', q = RUN.mode === 'solo' || !!sq; if (KIND !== k || SEQ !== q) { KIND = k; SEQ = q; setMode(); } }
   if (sq) {   // which algorithm is running, from the START / MARK lines
     const order = RUN.options.algos || [], cur = [...parseLines(RUN.log, 'START'), ...parseLines(RUN.log, 'MARK')].filter(m => m.algo).map(m => m.algo).pop() || order[0], i = order.indexOf(cur);
     if ($('#nextBtn').dataset.cur !== cur) { $('#nextBtn').dataset.cur = cur; $('#nextBtn').disabled = false; }
     $('#nextBtn').textContent = i + 1 < order.length ? `Next ▸ ${LABEL[order[i + 1]]}` : 'Finish ▸';
-    $('#seqNow').innerHTML = `now: <b>${LABEL[cur] || cur}</b> (${i + 1} of ${order.length})`;
+    $('#seqNow').textContent = '';
   } else $('#seqNow').textContent = '';
   $('#goBtn').disabled = !g && !(STATE && STATE.all_up);
 }
@@ -586,12 +591,54 @@ async function startRun(mode, options) {
   catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
 }
 function openRun(id) { $('#pdfMsg').textContent = ''; RUN = {id, log: []}; runSince = 0; for (const c of RUN_CHARTS) VIEW[c] = null; pollRun(); }
+// ---- countdown: the time left in the run shown, from the server's clock (STATE.at) and the run's own START / MARK / SAMPLE lines
+const mmss = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+let CLOCK_OFF = 0;   // server time − browser time, s
+const serverNow = () => Date.now() / 1000 + CLOCK_OFF;
+function runTiming() {   // {left, total, sub, seg} for the run shown while it goes; null when there is nothing to count down
+  const o = RUN.options || {}, now = serverNow(), algos = o.algos || ALGOS, n = algos.length, st = RUN.started || RUN.queued;
+  if (!st) return null;
+  if (RUN.mode === 'live') {
+    if (o.sequential) {
+      const turns = [...parseLines(RUN.log, 'START'), ...parseLines(RUN.log, 'MARK')].filter(m => m.algo), cur = turns.length ? turns[turns.length - 1] : {algo: algos[0], ts: st};
+      const i = Math.max(0, algos.indexOf(cur.algo)), turnLeft = Math.max(0, cur.ts + o.slot_s - now), left = turnLeft + (n - 1 - i) * o.slot_s;
+      return {left, total: left + (now - st), sub: 'left in the run', seg: `<b>${LABEL[cur.algo] || cur.algo}</b> ${mmss(turnLeft)} left in its turn (${i + 1} of ${n})`};
+    }
+    return {left: st + o.max_s - now, total: o.max_s, sub: 'until it stops by itself (or press Stop)'};
+  }
+  if (RUN.mode === 'compete' || RUN.mode === 'solo') {
+    const sm = parseLines(RUN.log, 'SAMPLE'), d = o.duration || 30;
+    if (RUN.mode === 'compete') {
+      const t0 = sm.length ? Math.min(...sm.map(x => x.ts - (x.t || 1))) : null, len = d + (o.stagger || 0) * (n - 1);
+      return t0 ? {left: t0 + len - now, total: len, sub: 'left'} : {left: len, total: len, sub: 'setting up the flows…', wait: true};
+    }
+    const last = sm.length ? sm[sm.length - 1] : null, i = last ? Math.max(0, algos.indexOf(last.cc)) : 0;
+    const start = last ? Math.min(...sm.filter(x => x.cc === last.cc).map(x => x.ts)) - 1 : null;   // its first sample comes 1 s in (t counts from the run's start)
+    const turnLeft = start ? Math.max(0, start + d - now) : d, left = turnLeft + (n - 1 - i) * (d + 2), total = n * d + (n - 1) * 2;
+    return {left, total, sub: start ? 'left' : 'setting up the flows…', wait: !start, seg: `<b>${LABEL[algos[i]]}</b> ${mmss(turnLeft)} left in its turn (${i + 1} of ${n})`};
+  }
+  return null;
+}
+function tick() {
+  const going = RUN && ['queued', 'running'].includes(RUN.status), st = RUN && (RUN.started || RUN.queued);
+  $('#runClock').style.display = going && st ? '' : 'none';
+  if (going && st) $('#runClock').textContent = '⏱ ' + mmss(serverNow() - st);
+  const t = going ? runTiming() : null;
+  $('#cdown').style.display = t ? '' : 'none';
+  if (!t) return;
+  $('#cdT').textContent = (t.left <= 0 && !t.wait ? '0:00' : mmss(t.left));
+  $('#cdSub').textContent = t.left <= 0 && !t.wait ? 'finishing…' : t.sub;
+  const u = t.total - t.left, of = t.total;   // the bar: the whole run
+  $('#cdBar').style.width = (100 * Math.min(1, Math.max(0, u / of))) + '%';
+  $('#cdSeg').innerHTML = t.seg || '';
+}
+setInterval(tick, 250);
 const parseLines = (log, tag) => log.filter(l => l.line.startsWith(tag + ' ')).map(l => { try { return JSON.parse(l.line.slice(tag.length + 1)); } catch (e) { return null; } }).filter(Boolean);
 async function pollRun() {
   if (!RUN) return;
   const id = RUN.id, d = await api(`/api/runs/${id}?since=${runSince}`).catch(() => null);
   if (!d || !RUN || RUN.id !== id) return;
-  RUN.log = [...RUN.log, ...d.log]; RUN.status = d.status; RUN.mode = d.mode; RUN.options = d.options || {}; runSince = d.log_offset + d.log.length;
+  RUN.log = [...RUN.log, ...d.log]; RUN.status = d.status; RUN.mode = d.mode; RUN.options = d.options || {}; RUN.started = d.steps?.[0]?.started || d.started; RUN.queued = d.started; runSince = d.log_offset + d.log.length;
   if (['compete', 'solo', 'live'].includes(d.mode)) {
     const o = d.options || {}, n = (o.algos || ALGOS).length, marks = parseLines(RUN.log, 'MARK');
     const running = ['queued', 'running'].includes(d.status), w = lastWan && lastWan.settings;
