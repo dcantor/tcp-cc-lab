@@ -54,6 +54,9 @@ title page, contents and an executive summary with key findings, then:
 5. the system load: each node's CPU and memory during the run;
 6. conclusions.
 
+Appendices: A, the device configurations; B, the run log; C, the repository and a numbered list of references
+(RFCs, papers and tool documentation), which the text cites as [n].
+
 Appendix A has every device's configuration, collected live; appendix B has the run's log.
 
 **Topology**: click any device (or a node in that table) to open `/config/<node>` in a new tab, with its configuration

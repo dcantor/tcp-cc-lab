@@ -2,6 +2,27 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.13.0] - 2026-10-23
+
+### Added
+- **Appendix C, "Repository and references"**, in the PDF report:
+  - **C.1 This lab:** links to the repository (now public), to the exact version that made the report
+    (`/tree/v<version>`), and to the README, the CHANGELOG and the report's source, with a note on how to repeat the
+    run.
+  - **C.2 References:** 35 numbered, linked sources in five groups. Every DOI was checked against Crossref and every
+    URL was checked to resolve.
+    - foundations of TCP congestion control: Jacobson 1988; RFCs 5681, 6582, 6928, 2018, 8985, 6298 and 9293;
+    - CUBIC: Ha, Rhee and Xu 2008; RFCs 9438 and 8312; the Linux source;
+    - BBR: Cardwell et al. in ACM Queue and CACM; the IETF BBR draft; Google's BBR page; the Linux source; Hock et
+      al. 2017; Ware et al. 2019; Cao et al. 2019;
+    - throughput models, fairness and buffers: Mathis 1997, Padhye 1998, Jain 1984, Appenzeller 2004, Gettys and
+      Nichols 2011, RFC 7567, bufferbloat.net;
+    - the lab's tools: netem, tbf, fq, ip-sysctl, iperf3, VyOS, libvirt, Alpine.
+- **In-text citations** ([n], linked to the list) where chapters 1, 4 and 6 name a source: Jacobson, RFC 5681,
+  CUBIC, BBR, the BBR draft, Mathis, RFC 9438, bufferbloat, Jain's index, BBR/CUBIC coexistence studies, and the
+  Linux BBR v1 source.
+- The cover's repository line is a link.
+
 ## [0.12.1] - 2026-10-23
 
 ### Changed

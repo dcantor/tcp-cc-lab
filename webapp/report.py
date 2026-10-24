@@ -12,6 +12,7 @@ from pathlib import Path
 
 import report_analysis
 import report_background
+import report_references
 
 LABEL = {"cubic": "CUBIC", "bbr": "BBR", "reno": "Reno"}
 COL = {"cubic": "#2a78d6", "bbr": "#eb6834", "reno": "#1baf7a", "q": "#b45309", "wanem": "#b45309", "r1": "#6b6a65", "r2": "#6b6a65"}
@@ -161,6 +162,8 @@ table.kv th { width: 24%; background: none; border-top: 0; border-bottom: 1px so
 .cover .abstract p { font-size: 9.6pt; color: #334155; margin: 0; }
 .cover .bottom { border-top: 1.5pt solid var(--head); padding-top: 10pt; display: flex; justify-content: space-between; align-items: flex-end; gap: 12mm; }
 .cover .author .name { font: 700 15pt "Noto Serif", serif; color: var(--head); } .cover .author .date { font-size: 10.5pt; color: #334155; margin-top: 2pt; }
+a { color: var(--accent); text-decoration: none; } .cite { white-space: nowrap; } .cite a { color: var(--accent); }
+ol.refs { padding-left: 24pt; margin: 2pt 0 8pt; } ol.refs li { margin: 3pt 0; font-size: 9pt; line-height: 1.45; text-align: left; break-inside: avoid; } ol.refs li a { overflow-wrap: anywhere; }
 .cover .meta { color: var(--mute); font-size: 8.3pt; line-height: 1.6; text-align: right; }
 .toc { columns: 2; column-gap: 14mm; font-size: 10pt; margin: 4pt 0 14pt; } .toc div { margin: 2pt 0; break-inside: avoid; } .toc .n { color: var(--accent); font-weight: 700; display: inline-block; width: 22pt; }
 /* appendix */
@@ -462,10 +465,10 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
 <div class='abstract'><div class='h'>Abstract</div><p>{E(summary)}</p></div></div>
 <div class='bottom'><div class='author'><div class='name'>{E(author)}</div><div class='date'>{time.strftime('%B %-d, %Y', time.localtime(started))}</div></div>
 <div class='meta'>Run <span class='mono'>{E(run['id'])}</span> · {E(run['status'])} · {time.strftime('%H:%M:%S', time.localtime(started))}–{time.strftime('%H:%M:%S', time.localtime(finished))} ({finished - started:.0f} s)<br>
-libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Linux'}) · {E(iperf[0].split(' (')[0]) if iperf else 'iperf3'}<br>tcp-cc-lab {E(lab_version)} · github.com/dcantor/tcp-cc-lab</div></div></section>"""
+libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Linux'}) · {E(iperf[0].split(' (')[0]) if iperf else 'iperf3'}<br>tcp-cc-lab {E(lab_version)} · <a href='{report_references.REPO}'>github.com/dcantor/tcp-cc-lab</a></div></div></section>"""
 
     chapters = [("1", "Background: Reno, CUBIC and BBR"), ("2", "Test environment"), ("3", "Methodology"), ("4", "Results"), ("5", "System load"), ("6", "Conclusions")] + \
-               ([("A", "Appendix: device configurations")] if cfg else []) + [("B", "Appendix: run log")]
+               ([("A", "Appendix: device configurations")] if cfg else []) + [("B", "Appendix: run log"), ("C", "Appendix: repository and references")]
     toc = "<div class='toc'>" + "".join(f"<div><span class='n'>{n_}</span>{E(t)}</div>" for n_, t in chapters) + "</div>"
     h2 = lambda n_, t, first=False: f"<h2><span class='n'>{n_}</span>{E(t)}</h2>"   # noqa: E731
 
@@ -516,7 +519,9 @@ libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Lin
 <section class='chapter'>{h2('5', 'System load')}<p>Each node's own /proc/stat and /proc/meminfo, sampled once a second over one SSH session per node. CPU is a percentage of the node's vCPUs.</p>{load}</section>
 <section class='chapter'>{h2('6', 'Conclusions')}{concl}</section>
 {app_a.replace("<h2 class='page'>Appendix A. Device configurations</h2>", "<section class='chapter'>" + h2('A', 'Appendix: device configurations')) + '</section>' if app_a else ''}
-<section class='chapter'>{h2('B', 'Appendix: run log')}{app_b.replace("<h2 class='page'>Appendix B. Run log</h2>", "")}</section>"""
+<section class='chapter'>{h2('B', 'Appendix: run log')}{app_b.replace("<h2 class='page'>Appendix B. Run log</h2>", "")}</section>
+<section class='chapter'>{h2('C', 'Appendix: repository and references')}{report_references.appendix(lab_version)}</section>"""
+    body = report_references.add_citations(body)
     css = CSS.replace("%(runid)s", run["id"]).replace("%(version)s", lab_version).replace("%(author)s", author)
     return f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{E(title)}: {E(subtitle)} · flow test {E(run['id'])}</title><style>{css}</style></head><body>{body}</body></html>"
 
