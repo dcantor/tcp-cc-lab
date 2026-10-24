@@ -2,6 +2,18 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.13.1] - 2026-10-23
+
+### Fixed
+- **A live one-at-a-time run with three algorithms stuck at "0:00 finishing…", and its PDF could not be downloaded.**
+  Once the first algorithm's turn scrolled out of the charts' window, its series was clipped to nothing and the chart
+  code threw. The error stopped the page's polling, so the page never saw the run end; the run itself finished
+  normally. Series are now clipped before the chart decides which ones to draw.
+- **The page's run polling can no longer stop on an error:**
+  - a failed request is retried after 2 s;
+  - a chart error is logged and skipped;
+  - only one polling loop runs per run shown. Before, each status request could go out twice.
+
 ## [0.13.0] - 2026-10-23
 
 ### Added

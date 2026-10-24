@@ -214,9 +214,9 @@ const colorOf = k => SER[k] ? SER[k].color : color(k), labelOf = k => SER[k] ? S
 function lineChart(el, series, opt) {
   // series: {key: [[x, y], ...]}; opt: {unit, marks: [{x, label}], xmin, xmax, hlines: [{y, label}], aria}
   const W = 520, H = 230, L = 40, R = 12, T = 12, B = 26;
-  const keys = [...ALGOS, ...Object.keys(series).filter(k => !ALGOS.includes(k))].filter(k => series[k] && series[k].length);
   const xmin = opt.xmin || 0, xmax = Math.max(opt.xmax || 0, xmin + 10);
-  for (const k of keys) series[k] = series[k].filter(q => q[0] >= xmin - 1.5 && q[0] <= xmax + 1.5);   // one point either side, clipped to the plot
+  for (const k of Object.keys(series)) series[k] = (series[k] || []).filter(q => q[0] >= xmin - 1.5 && q[0] <= xmax + 1.5);   // one point either side, clipped to the plot
+  const keys = [...ALGOS, ...Object.keys(series).filter(k => !ALGOS.includes(k))].filter(k => series[k] && series[k].length);   // after clipping: a series wholly outside the window is not drawn
   const pts = keys.flatMap(k => series[k]), hl = opt.hlines || [];
   let ymax = opt.ymax || Math.min(niceMax(Math.max(...pts.map(p => p[1]), ...hl.map(h => h.y * 1.05), opt.ymin || 1)), opt.ycap || Infinity);   // ycap: scale to fit, up to this
   const xf = opt.xfmt || (v => `${v}s`);
@@ -590,7 +590,14 @@ async function startRun(mode, options) {
   try { const r = await post('/api/runs', {mode, options}); openRun(r.id); }
   catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
 }
-function openRun(id) { $('#pdfMsg').textContent = ''; RUN = {id, log: []}; runSince = 0; for (const c of RUN_CHARTS) VIEW[c] = null; pollRun(); }
+let POLL_GEN = 0;   // one polling loop per run shown: opening a run ends the previous loop
+function openRun(id) { $('#pdfMsg').textContent = ''; RUN = {id, log: []}; runSince = 0; for (const c of RUN_CHARTS) VIEW[c] = null; pollRun(++POLL_GEN); }
+async function pollRun(gen) {   // a failed request or a drawing error must never stop the loop: the page would miss the run's end
+  if (gen !== POLL_GEN || !RUN) return;
+  let next = 2000;
+  try { next = await pollRunOnce(); } catch (e) { console.error('run poll', e); }
+  if (gen === POLL_GEN && next) setTimeout(() => pollRun(gen), next);
+}
 // ---- countdown: the time left in the run shown, from the server's clock (STATE.at) and the run's own START / MARK / SAMPLE lines
 const mmss = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
 let CLOCK_OFF = 0;   // server time − browser time, s
@@ -634,10 +641,11 @@ function tick() {
 }
 setInterval(tick, 250);
 const parseLines = (log, tag) => log.filter(l => l.line.startsWith(tag + ' ')).map(l => { try { return JSON.parse(l.line.slice(tag.length + 1)); } catch (e) { return null; } }).filter(Boolean);
-async function pollRun() {
-  if (!RUN) return;
+async function pollRunOnce() {   // ms until the next poll, or 0 when the run has ended
+  if (!RUN) return 0;
   const id = RUN.id, d = await api(`/api/runs/${id}?since=${runSince}`).catch(() => null);
-  if (!d || !RUN || RUN.id !== id) return;
+  if (!RUN || RUN.id !== id) return 0;
+  if (!d) return 2000;   // the portal did not answer: try again
   RUN.log = [...RUN.log, ...d.log]; RUN.status = d.status; RUN.mode = d.mode; RUN.options = d.options || {}; RUN.started = d.steps?.[0]?.started || d.started; RUN.queued = d.started; runSince = d.log_offset + d.log.length;
   if (['compete', 'solo', 'live'].includes(d.mode)) {
     const o = d.options || {}, n = (o.algos || ALGOS).length, marks = parseLines(RUN.log, 'MARK');
@@ -648,7 +656,7 @@ async function pollRun() {
       t0: d.mode === 'live' ? d.steps[0].started : null, wan0: start || d.result?.wan, bitrate0: o.bitrate_mbit || 0, bitrateNow: brNow,
       wanNow: running ? w : d.result?.wan, current: o.sequential && running ? [start, ...marks].filter(m => m && m.algo).map(m => m.algo).pop() : null, duration: d.mode === 'solo' ? (o.duration + 2) * n : o.duration + (o.stagger || 0) * (n - 1) + 2};
     if (running && d.mode === 'live' && !$('#br').dataset.drag) { $('#br').value = nearest(BR, brNow); showBr(brNow); }
-    drawCharts();
+    try { drawCharts(); } catch (e) { console.error('charts', e); }
     $('#flowRes').innerHTML = d.result ? flowTable(d.result) : `<span class="mute small">${running ? (d.mode === 'live' ? 'live — move the sliders and watch each algorithm react; Stop ends it' : 'running — move the RTT slider to see each algorithm react') : esc(d.status)}</span>`;
   }
   goButton(); pdfButton();
@@ -657,7 +665,8 @@ async function pollRun() {
   const steps = d.steps.map(s => `<li><span class="st ${s.status}">${s.status}</span> ${esc(s.title)}${s.summary ? ` — <span class="mute">${esc(s.summary)}</span>` : ''}</li>`).join('');
   $('#run').innerHTML = `<div><b>${esc(d.mode)}</b> <span class="pill ${d.status === 'success' ? 'ok' : d.status === 'failed' ? 'bad' : 'accent'}">${esc(d.status)}</span> <span class="mute">${esc(d.id)}</span>${d.error ? ` <span class="bad">${esc(d.error)}</span>` : ''}</div>` +
     `<ul class="steps">${steps}</ul><pre>${esc(log)}</pre>`;
-  if (['queued', 'running'].includes(d.status)) setTimeout(pollRun, d.mode === 'live' ? 500 : 1000); else refresh();
+  if (['queued', 'running'].includes(d.status)) return d.mode === 'live' ? 500 : 1000;
+  refresh(); return 0;
 }
 
 function applyTheme() { let t = null; try { t = localStorage.getItem('portal-theme'); } catch (e) { }
