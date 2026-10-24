@@ -154,6 +154,7 @@ table.kv th { width: 24%; background: none; border-top: 0; border-bottom: 1px so
 .cover .kicker { color: var(--accent); font-weight: 700; letter-spacing: .18em; text-transform: uppercase; font-size: 10pt; }
 .cover .series { color: var(--mute); font-size: 9pt; letter-spacing: .04em; }
 .cover h1 { font-size: 30pt; line-height: 1.15; font-weight: 700; letter-spacing: -.01em; margin: 0 0 10pt; }
+.cover .subtitle { font-family: "Noto Serif", serif; font-size: 15pt; line-height: 1.3; color: var(--accent); margin: -2pt 0 12pt; text-align: left; }
 .cover .lede { font-family: "Noto Serif", serif; font-style: italic; font-size: 12.5pt; line-height: 1.45; color: #334155; margin: 0 0 16pt; text-align: left; }
 .cover .abstract { border-top: 1px solid #cbd5e1; border-bottom: 1px solid #cbd5e1; padding: 9pt 0; }
 .cover .abstract .h { font-weight: 700; font-size: 8.5pt; letter-spacing: .14em; text-transform: uppercase; color: var(--head); margin-bottom: 3pt; }
@@ -448,12 +449,15 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
         tbl_n[0] += 1
         return f"<div class='tbl'>{html_}<div class='cap'><b>Table {tbl_n[0]}.</b> {title}.{(' ' + text.rstrip('.') + '.') if text else ''}</div></div>"
 
-    title = {"compete": "Three Algorithms, One Bottleneck", "solo": "Each Algorithm Alone", "live": "Each Algorithm Alone, Under Changing Conditions" if seq else "Congestion Control Under Changing Conditions"}[mode]
-    kicker = {"compete": "Flow test · compete", "solo": "Flow test · solo", "live": "Flow test · live, one at a time" if seq else "Flow test · live"}[mode]
+    title = "Comparison of TCP Congestion Control Algorithms" if len(algos) > 1 else f"Performance of TCP {ln(algos[0])}" if algos else "TCP Congestion Control Performance"
+    subtitle = {"compete": "Concurrent flows through a shared bottleneck", "solo": "Isolated flows, measured one at a time",
+                "live": "Isolated flows under changing network conditions" if seq else "Concurrent flows under changing network conditions"}[mode]
+    if len(algos) == 1: subtitle = {"compete": "A single flow through the bottleneck", "solo": "A single flow through the bottleneck", "live": "A single flow under changing network conditions"}[mode]
+    kicker = "Technical report · " + {"compete": "Concurrent test", "solo": "Isolated test", "live": "Live test, isolated flows" if seq else "Live test, concurrent flows"}[mode]
     lede = (f"{' vs '.join(ln(a) for a in algos)} across an emulated WAN: {wtxt}" + (f", sender bit rate {br:g} Mbit/s per flow" if br else "") + ".")
     cover = f"""<section class='cover'>
 <div class='top'><div class='kicker'>{kicker}</div><div class='series'>Network lab series · tcp-cc-lab</div></div>
-<div><h1>{title}</h1><p class='lede'>{E(lede)}</p>
+<div><h1>{title}</h1><p class='subtitle'>{E(subtitle)}</p><p class='lede'>{E(lede)}</p>
 <div class='kpis'>{kpis}</div>
 <div class='abstract'><div class='h'>Abstract</div><p>{E(summary)}</p></div></div>
 <div class='bottom'><div class='author'><div class='name'>{E(author)}</div><div class='date'>{time.strftime('%B %-d, %Y', time.localtime(started))}</div></div>
@@ -514,7 +518,7 @@ libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Lin
 {app_a.replace("<h2 class='page'>Appendix A. Device configurations</h2>", "<section class='chapter'>" + h2('A', 'Appendix: device configurations')) + '</section>' if app_a else ''}
 <section class='chapter'>{h2('B', 'Appendix: run log')}{app_b.replace("<h2 class='page'>Appendix B. Run log</h2>", "")}</section>"""
     css = CSS.replace("%(runid)s", run["id"]).replace("%(version)s", lab_version).replace("%(author)s", author)
-    return f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{E(title)} · flow test {E(run['id'])}</title><style>{css}</style></head><body>{body}</body></html>"
+    return f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{E(title)}: {E(subtitle)} · flow test {E(run['id'])}</title><style>{css}</style></head><body>{body}</body></html>"
 
 
 def build_pdf(html, out_pdf):

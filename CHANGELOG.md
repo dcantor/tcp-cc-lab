@@ -2,6 +2,16 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.12.1] - 2026-10-23
+
+### Changed
+- The PDF report's cover has a professional title: **"Comparison of TCP Congestion Control Algorithms"** ("Performance
+  of TCP <algorithm>" for a single-algorithm run). A subtitle names the kind of test: "Concurrent flows through a
+  shared bottleneck", "Isolated flows, measured one at a time", or "Concurrent / Isolated flows under changing
+  network conditions".
+- The kicker reads "Technical report · …" (e.g. "Technical report · Live test, concurrent flows") instead of "Flow
+  test · …".
+
 ## [0.12.0] - 2026-10-23
 
 ### Added
