@@ -41,7 +41,7 @@ def fmt(v):
     return "–" if v is None else f"{v:.0f}" if abs(v) >= 100 else f"{v:.1f}".rstrip("0").rstrip(".") if abs(v) >= 10 else f"{v:.2f}".rstrip("0").rstrip(".")
 
 
-def chart(series, unit, xmax, marks=(), hline=None, ymax=None, w=720, h=210, legend=True, ycap=None):
+def chart(series, unit, xmax, marks=(), hline=None, ymax=None, w=720, h=210, legend=True, ycap=None, xunit="s", dots=False):
     """series: [(key, label, [(x, y)])]; x in seconds from the start of the run."""
     L, R, T, B = 46, 74, 16, 28
     ys = [y for _, _, p in series for _, y in p]
@@ -58,7 +58,7 @@ def chart(series, unit, xmax, marks=(), hline=None, ymax=None, w=720, h=210, leg
     step = next(st for st in (5, 10, 15, 20, 30, 60, 120, 300, 600) if xmax / st <= 14)
     t = 0
     while t <= xmax + 1e-6:
-        s.append(f"<line x1='{X(t):.1f}' x2='{X(t):.1f}' y1='{T}' y2='{h - B}' stroke='#f2f1ee'/><text x='{X(t):.1f}' y='{h - B + 13}' text-anchor='middle' fill='#52514e'>{t:g}s</text>")
+        s.append(f"<line x1='{X(t):.1f}' x2='{X(t):.1f}' y1='{T}' y2='{h - B}' stroke='#f2f1ee'/><text x='{X(t):.1f}' y='{h - B + 13}' text-anchor='middle' fill='#52514e'>{t:g}{xunit}</text>")
         t += step
     if hline:
         s.append(f"<line x1='{L}' x2='{w - R}' y1='{Y(hline[0]):.1f}' y2='{Y(hline[0]):.1f}' stroke='#8a8984' stroke-dasharray='3 3'/>"
@@ -71,6 +71,7 @@ def chart(series, unit, xmax, marks=(), hline=None, ymax=None, w=720, h=210, leg
         if not pts: continue
         d = " ".join(f"{'M' if i == 0 else 'L'}{X(x):.1f},{Y(y):.1f}" for i, (x, y) in enumerate(pts))
         s.append(f"<path d='{d}' fill='none' stroke='{COL.get(key, '#52514e')}' stroke-width='1.8' stroke-linejoin='round'{' stroke-dasharray=\"6 4\"' if key in DASHED else ''}/>")
+        if dots: s.extend(f"<circle cx='{X(x):.1f}' cy='{Y(y):.1f}' r='3.5' fill='{COL.get(key, '#52514e')}' stroke='#fff' stroke-width='1.5'/>" for x, y in pts)
         ends.append([Y(pts[-1][1]), label])
     if legend and len(ends) <= 4:
         ends.sort()
@@ -308,6 +309,8 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     rank = sorted(kp.items(), key=lambda x: -x[1])
     wtxt = (f"RTT {wan0.get('rtt_ms', 0):g} ms, a {wan0.get('rate_mbit', 0):g} Mbit/s bottleneck, {wan0.get('loss_pct', 0):g} % random loss and a "
             f"{wan0.get('buffer_bdp', 0):g} × BDP buffer") if wan0 else "the WAN as set"
+    if o.get("rtt_sweep") and wan0: wtxt = wtxt.replace(f"RTT {wan0.get('rtt_ms', 0):g} ms", f"RTT swept {o['rtts'][0]:g}–{o['rtts'][-1]:g} ms", 1)
+    sweep_txt = (f"The RTT was swept through {', '.join(f'{r:g}' for r in o['rtts'])} ms, {o.get('step_s')} s at each" + (" within each algorithm's turn" if seq else "") + ". ") if o.get("rtt_sweep") else ""
     if mode == "compete":
         fl = res.get("flows", []); tot = res.get("total_mbps") or 0
         summary = (f"{len(fl)} flows ran at the same time, one per algorithm, through the same bottleneck for {o.get('duration')} s, with {wtxt}. "
@@ -321,9 +324,11 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
         summary = ((f"The algorithms ran one at a time, up to {o.get('slot_s')} s each, {res.get('seconds', 0):g} s in all, starting with {wtxt} and " if seq else
                 f"The flows ran together for {res.get('seconds', 0):g} s, starting with {wtxt} and ")
                    + (f"a sender bit rate of {br:g} Mbit/s per flow. " if br else "no sender bit-rate limit. ")
-                   + (lambda nch: f"{nch} change{'s were' if nch != 1 else ' was'} made while they ran (section 3). " if nch else "Nothing was changed while they ran. ")(
-                       len([m for m in marks if set(m) - {"ts", "algo"}]))
+                   + (lambda nch: f"{'Besides the sweep, ' if o.get('rtt_sweep') else ''}{nch} change{'s were' if nch != 1 else ' was'} made while they ran (section 3). " if nch else
+                      "Nothing else was changed while they ran. " if o.get("rtt_sweep") else "Nothing was changed while they ran. ")(
+                       max(0, len([m for m in marks if set(m) - {"ts", "algo"}]) - ((len(o["rtts"]) * len(algos) - 1 if seq else len(o["rtts"]) - 1) if o.get("rtt_sweep") else 0)))
                    + "Averaged over the run (time-weighted across the flows' segments): " + ", ".join(f"{ln(a)} {fmt(v)} Mbit/s" for a, v in rank) + ".")
+    if sweep_txt: summary = summary.replace(" Averaged over the run", " " + sweep_txt + "Averaged over the run", 1) if " Averaged over the run" in summary else summary + " " + sweep_txt
     if run.get("error"): summary += f" The run ended with an error: {run['error']}."
 
     # ---- section 2: the lab
@@ -456,6 +461,7 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     subtitle = {"compete": "Concurrent flows through a shared bottleneck", "solo": "Isolated flows, measured one at a time",
                 "live": "Isolated flows under changing network conditions" if seq else "Concurrent flows under changing network conditions"}[mode]
     if len(algos) == 1: subtitle = {"compete": "A single flow through the bottleneck", "solo": "A single flow through the bottleneck", "live": "A single flow under changing network conditions"}[mode]
+    if o.get("rtt_sweep"): subtitle = ("A single flow" if len(algos) == 1 else "Isolated flows" if seq else "Concurrent flows") + f" across round-trip times from {o['rtts'][0]:g} to {o['rtts'][-1]:g} ms"
     kicker = "Technical report · " + {"compete": "Concurrent test", "solo": "Isolated test", "live": "Live test, isolated flows" if seq else "Live test, concurrent flows"}[mode]
     lede = (f"{' vs '.join(ln(a) for a in algos)} across an emulated WAN: {wtxt}" + (f", sender bit rate {br:g} Mbit/s per flow" if br else "") + ".")
     cover = f"""<section class='cover'>
@@ -486,6 +492,9 @@ libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Lin
     # chapter 3: results
     res_main = re.sub(r"^(<table>.*?</table>)", lambda m_: table(m_.group(1), "Results per flow"), res_tbl, count=1, flags=re.S)
     res_html = res_main + (table(ph_tbl, "Mean throughput and RTT in each phase", "A phase runs from one change to the next; means of the per-second samples.") if ph_tbl else "")
+    if o.get("rtt_sweep"): res_html += report_analysis.sweep_section(dict(algos=algos, per=per, t0=t0, phases=phases, states=states, rtts=o["rtts"], step_s=o.get("step_s"),
+                                                                     seq=seq, wan0=wan0, mss=next((g.get("mss") for g in res.get("segments", []) if g.get("mss")), None) or ((mtu or 1500) - 52),
+                                                                     br=br, figure=figure, table=table, chart=chart, rmem_max=(lambda v: int(v.split()[-1]) if v else None)(ref.get("net.ipv4.tcp_rmem"))))
     res_html += "<h3>Per second</h3>" + legend(algos) + "".join(figure(c, t, s_[0].upper() + s_[1:]) for t, s_, c in figs)
     cw = [(a, LABEL[a], [(s_["ts"] - t0, s_["cwnd"] / 1e6) for s_ in per[a] if s_.get("cwnd")]) for a in algos]
     ana, ana_find = report_analysis.chapter(dict(algos=algos, per=per, wans=wans, mk=mk, phases=phases, states=states, wan0=wan0, res=res, br=br, mode="solo" if seq else mode,

@@ -2,6 +2,32 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.14.0] - 2026-10-23
+
+### Added
+- **RTT sweep:** a "sweep 0–90 ms" checkbox next to the WAN card's Round-trip time. When it is checked, a flow run
+  steps the RTT through **0, 15, 30, 60 and 90 ms**, changing it in place so the flows keep going. The flows'
+  duration control becomes **"each RTT for"** (10 s – 5 min, default 30 s).
+  - **Together:** the flows run at once through all five steps.
+  - **One at a time:** during each algorithm's turn the RTT steps through all five; Next skips to the next
+    algorithm.
+  - A sweep ends by itself after its last step, so Live/Timed does not apply and is greyed out. The RTT slider is
+    locked while the sweep runs; the other WAN controls and the bit rate still act on the running flows.
+  - Afterwards the RTT goes back to what it was, however the run ended.
+  - The charts mark each step. The countdown shows the RTT now (e.g. "RTT 30 ms (3 of 5), 0:04 left at it") and
+    the time left in the sweep.
+  - API: `options.rtt_sweep` and `options.step_s` on a live run.
+- **The PDF report covers sweeps:**
+  - a table of each flow's mean throughput and RTT at each step, leaving out each step's first 3 s, with the BDP;
+  - a "Throughput against RTT" figure;
+  - per algorithm, the trend from the shortest to the longest RTT, against what its design predicts (Reno ∝ 1/RTT,
+    CUBIC ∝ RTT^−¼, BBR flat);
+  - when the flows ran together and one took most of the link, a note that the others' numbers mostly reflect
+    competition;
+  - when BBR stalls at a step right after a shorter RTT, an explanation: its 10 s min-RTT filter still held the old
+    RTT;
+  - the window ceiling from the hosts' receive buffers, and the cover subtitle and summary describe the sweep.
+
 ## [0.13.1] - 2026-10-23
 
 ### Fixed

@@ -51,8 +51,10 @@ svg .wire { stroke:var(--wire); stroke-width:2; fill:none; }
 svg a.node { cursor:pointer; } svg a.node:hover .box, svg a.node:focus .box { stroke:var(--accent); stroke-width:2.5; }
 /* the slider */
 .ctl { display:grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap:10px 14px; align-items:center; }
-@media (max-width: 600px) { .ctl { grid-template-columns: minmax(0, 1fr) auto; } .ctl > label { grid-column: 1 / -1; margin-bottom:-6px; } }
+@media (max-width: 600px) { .ctl { grid-template-columns: minmax(0, 1fr) auto; } .ctl > label, .ctl > .lblcell { grid-column: 1 / -1; margin-bottom:-6px; } .lblcell { flex-direction:row; gap:12px; } }
 .ctl label { color:var(--mute); }
+.lblcell { display:flex; flex-direction:column; gap:2px; } .sweepbox { font-size:12px; display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
+.sweepbox input { margin:0; } .sweepbox.on { color:var(--accent); font-weight:600; }
 input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
 .big { font-size:22px; font-weight:600; font-variant-numeric: tabular-nums; } .big small { font-size:13px; font-weight:400; color:var(--mute); }
 .kpis { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap:10px; margin-top:12px; }
@@ -89,7 +91,7 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
     <section class="card">
       <h2>WAN emulator <span class="mute small">— wanem: netem delay (RTT ÷ 2 each way) then a tbf bottleneck, both directions</span></h2>
       <div class="ctl">
-        <label for="rtt">Round-trip time</label>
+        <div class="lblcell"><label for="rtt">Round-trip time</label><label class="sweepbox" title="Each flow run steps the RTT through 0, 15, 30, 60 and 90 ms (in place, the flows keep going), then puts it back"><input type="checkbox" id="sweep"> sweep 0–90 ms</label></div>
         <input type="range" id="rtt" min="0" max="300" step="1" value="30" list="rttTicks" aria-describedby="rttVal">
         <div class="big" id="rttVal">30 ms <small>15 + 15</small></div>
         <label for="rate">Bottleneck rate</label>
@@ -516,17 +518,23 @@ $('#br').addEventListener('change', async e => {
   catch (x) { $('#wanMsg').innerHTML = `<span class="bad">${esc(x.message)}</span>`; }
 });
 const DUR = {live: [[120, '2 min'], [300, '5 min'], [600, '10 min'], [900, '15 min'], [1800, '30 min']], liveSeq: [[30, '30 s'], [60, '60 s'], [120, '2 min'], [300, '5 min'], [600, '10 min']],
+             sweep: [[10, '10 s'], [20, '20 s'], [30, '30 s'], [60, '60 s'], [120, '2 min'], [300, '5 min']],
              compete: [[20, '20 s'], [30, '30 s'], [60, '60 s'], [120, '120 s']], solo: [[20, '20 s'], [30, '30 s'], [60, '60 s'], [120, '120 s']]};
-let KIND = 'live', SEQ = false;   // the two toggles; MODE follows: live (either order), compete (timed, together), solo (timed, one at a time)
+const SWEEP_RTTS = [0, 15, 30, 60, 90];   // ms, as the portal's sweep (app.py SWEEP_RTTS)
+let KIND = 'live', SEQ = false, SWEEP = false;   // the two toggles; MODE follows: live (either order), compete (timed, together), solo (timed, one at a time)
 function setMode() {
-  MODE = KIND === 'live' ? 'live' : SEQ ? 'solo' : 'compete'; const d = MODE === 'live' && SEQ ? 'liveSeq' : MODE;
-  document.querySelectorAll('#kindSeg button').forEach(x => x.classList.toggle('on', x.dataset.k === KIND));
+  MODE = SWEEP || KIND === 'live' ? 'live' : SEQ ? 'solo' : 'compete'; const d = SWEEP ? 'sweep' : MODE === 'live' && SEQ ? 'liveSeq' : MODE;   // a sweep runs on the live engine and ends by itself
+  document.querySelectorAll('#kindSeg button').forEach(x => { x.classList.toggle('on', !SWEEP && x.dataset.k === KIND); x.disabled = SWEEP; });
+  $('#kindSeg').title = SWEEP ? 'An RTT sweep ends by itself after its last step; the other WAN controls still act on the running flows.' : $('#kindSeg').dataset.title || $('#kindSeg').title;
+  $('#sweep').checked = SWEEP; $('#sweep').closest('label').classList.toggle('on', SWEEP);
   document.querySelectorAll('#orderSeg button').forEach(x => x.classList.toggle('on', (x.dataset.o === 'seq') === SEQ));
-  $('#dur').innerHTML = DUR[d].map(([v, t]) => `<option value="${v}">${t}</option>`).join(''); $('#dur').value = {live: 600, liveSeq: 60, compete: 30, solo: 20}[d];
-  $('#durLbl').textContent = d === 'live' ? 'stop after' : SEQ ? 'each for' : 'duration'; $('#stag').disabled = MODE !== 'compete'; $('#liveHelp').style.display = MODE === 'live' ? '' : 'none';
-  $('#liveHelp').innerHTML = MODE === 'live' && SEQ ? LIVE_HELP_SEQ : LIVE_HELP;
+  $('#dur').innerHTML = DUR[d].map(([v, t]) => `<option value="${v}">${t}</option>`).join(''); $('#dur').value = {live: 600, liveSeq: 60, sweep: 30, compete: 30, solo: 20}[d];
+  $('#durLbl').textContent = d === 'sweep' ? 'each RTT for' : d === 'live' ? 'stop after' : SEQ ? 'each for' : 'duration'; $('#stag').disabled = MODE !== 'compete'; $('#liveHelp').style.display = MODE === 'live' ? '' : 'none';
+  $('#liveHelp').innerHTML = SWEEP ? (SEQ ? LIVE_HELP_SWEEP_SEQ : LIVE_HELP_SWEEP) : MODE === 'live' && SEQ ? LIVE_HELP_SEQ : LIVE_HELP;
 }
 const LIVE_HELP = $('#liveHelp').innerHTML;
+const LIVE_HELP_SWEEP = `RTT sweep: the flows run together while the RTT steps through ${SWEEP_RTTS.join(', ')} ms, for the time set at each, changed in place (the flows keep going). The run ends after the last step and the RTT goes back to what it was. The other WAN controls and the bit rate still act on the running flows; the charts mark each step.`;
+const LIVE_HELP_SWEEP_SEQ = `RTT sweep, one at a time: each algorithm runs alone, in turn, and during its turn the RTT steps through ${SWEEP_RTTS.join(', ')} ms, for the time set at each. <b>Next ▸</b> skips to the next algorithm. The run ends after the last one and the RTT goes back to what it was; the charts mark each step.`;
 const LIVE_HELP_SEQ = 'Live, one at a time: each algorithm runs alone for the time set, in turn (CUBIC, BBR, Reno), and the run ends after the last. <b>Next ▸</b> moves on early; Stop ends it. The WAN and bit-rate controls act on the flow that is running, as in a live test with the flows together; the charts mark where each algorithm starts.';
 function pdfButton() {   // the report is for the run shown, once it has finished
   const ok = RUN && ['compete', 'solo', 'live'].includes(RUN.mode) && ['success', 'failed'].includes(RUN.status);
@@ -549,7 +557,8 @@ function goButton() {
   const g = liveGoing(); $('#goBtn').textContent = g ? 'Stop' : 'Start'; $('#goBtn').classList.toggle('primary', !g);
   const sq = g && RUN.options?.sequential; $('#nextBtn').style.display = sq ? '' : 'none';
   const fr = RUN && ['queued', 'running'].includes(RUN.status) && ['live', 'compete', 'solo'].includes(RUN.mode);   // the toggles show how the running test runs
-  if (fr) { const k = RUN.mode === 'live' ? 'live' : 'timed', q = RUN.mode === 'solo' || !!sq; if (KIND !== k || SEQ !== q) { KIND = k; SEQ = q; setMode(); } }
+  if (fr) { const k = RUN.mode === 'live' ? 'live' : 'timed', q = RUN.mode === 'solo' || !!RUN.options?.sequential, w = !!RUN.options?.rtt_sweep; if (KIND !== k || SEQ !== q || SWEEP !== w) { KIND = k; SEQ = q; SWEEP = w; setMode(); } }
+  const swg = g && RUN.options?.rtt_sweep; $('#rtt').disabled = !!swg; $('#rtt').title = swg ? 'the RTT sweep is setting the RTT' : '';
   if (sq) {   // which algorithm is running, from the START / MARK lines
     const order = RUN.options.algos || [], cur = [...parseLines(RUN.log, 'START'), ...parseLines(RUN.log, 'MARK')].filter(m => m.algo).map(m => m.algo).pop() || order[0], i = order.indexOf(cur);
     if ($('#nextBtn').dataset.cur !== cur) { $('#nextBtn').dataset.cur = cur; $('#nextBtn').disabled = false; }
@@ -561,6 +570,8 @@ function goButton() {
 function algosChosen() { return ALGOS.filter(a => $('#al_' + a).checked); }
 $('#algoPick').innerHTML = ALGOS.map(a => `<label><input type="checkbox" id="al_${a}" checked> <span class="sw" style="background:${color(a)}"></span>${LABEL[a]}</label>`).join(' ');
 document.querySelectorAll('#kindSeg button').forEach(b => b.onclick = () => { if (!liveGoing()) { KIND = b.dataset.k; setMode(); } });
+$('#kindSeg').dataset.title = $('#kindSeg').title;
+$('#sweep').addEventListener('change', e => { if (liveGoing()) { e.target.checked = SWEEP; return; } SWEEP = e.target.checked; setMode(); });
 document.querySelectorAll('#orderSeg button').forEach(b => b.onclick = () => { if (!liveGoing()) { SEQ = b.dataset.o === 'seq'; setMode(); } });
 $('#nextBtn').onclick = async () => { try { await post('/api/live/next', {}); $('#nextBtn').disabled = true; } catch (e) { $('#wanMsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } };
 $('#win').addEventListener('input', e => { WIN = +e.target.value > 300 ? 0 : +e.target.value; drawCharts(); });
@@ -581,7 +592,7 @@ setMode(); showBr(BR[+$('#br').value]);
 $('#goBtn').onclick = async () => {
   if (liveGoing()) { try { await post('/api/live/stop', {}); $('#goBtn').disabled = true; $('#goBtn').textContent = 'stopping…'; } catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } return; }
   const br = BR[+$('#br').value], o = {direction: $('#dir').value, algos: algosChosen(), bitrate_mbit: br};
-  startRun(MODE, MODE === 'live' ? (SEQ ? {...o, sequential: true, slot_s: +$('#dur').value} : {...o, max_s: +$('#dur').value}) : {...o, duration: +$('#dur').value, stagger: MODE === 'compete' ? +$('#stag').value : 0});
+  startRun(MODE, SWEEP ? {...o, rtt_sweep: true, sequential: SEQ, step_s: +$('#dur').value} : MODE === 'live' ? (SEQ ? {...o, sequential: true, slot_s: +$('#dur').value} : {...o, max_s: +$('#dur').value}) : {...o, duration: +$('#dur').value, stagger: MODE === 'compete' ? +$('#stag').value : 0});
 };
 $('#verifyBtn').onclick = () => startRun('verify', {});
 $('#testBtn').onclick = () => startRun('test', {});
@@ -606,10 +617,17 @@ function runTiming() {   // {left, total, sub, seg} for the run shown while it g
   const o = RUN.options || {}, now = serverNow(), algos = o.algos || ALGOS, n = algos.length, st = RUN.started || RUN.queued;
   if (!st) return null;
   if (RUN.mode === 'live') {
+    let stepTxt = '';
+    if (o.rtt_sweep) {   // the RTT step now: the last START / MARK with an RTT
+      const steps = [...parseLines(RUN.log, 'START'), ...parseLines(RUN.log, 'MARK')].filter(m => 'rtt_ms' in m), cur = steps.length ? steps[steps.length - 1] : {rtt_ms: o.rtts[0], ts: st};
+      const j = Math.max(0, o.rtts.indexOf(cur.rtt_ms)), stepLeft = Math.max(0, cur.ts + o.step_s - now);
+      stepTxt = ` · RTT <b>${cur.rtt_ms} ms</b> (${j + 1} of ${o.rtts.length}), ${mmss(stepLeft)} left at it`;
+      if (!o.sequential) { const left = stepLeft + (o.rtts.length - 1 - j) * o.step_s; return {left, total: o.step_s * o.rtts.length, sub: 'left in the sweep', seg: stepTxt.slice(3)}; }
+    }
     if (o.sequential) {
       const turns = [...parseLines(RUN.log, 'START'), ...parseLines(RUN.log, 'MARK')].filter(m => m.algo), cur = turns.length ? turns[turns.length - 1] : {algo: algos[0], ts: st};
       const i = Math.max(0, algos.indexOf(cur.algo)), turnLeft = Math.max(0, cur.ts + o.slot_s - now), left = turnLeft + (n - 1 - i) * o.slot_s;
-      return {left, total: left + (now - st), sub: 'left in the run', seg: `<b>${LABEL[cur.algo] || cur.algo}</b> ${mmss(turnLeft)} left in its turn (${i + 1} of ${n})`};
+      return {left, total: left + (now - st), sub: 'left in the run', seg: `<b>${LABEL[cur.algo] || cur.algo}</b> ${mmss(turnLeft)} left in its turn (${i + 1} of ${n})` + stepTxt};
     }
     return {left: st + o.max_s - now, total: o.max_s, sub: 'until it stops by itself (or press Stop)'};
   }

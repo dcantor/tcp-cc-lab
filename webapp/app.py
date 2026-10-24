@@ -44,7 +44,8 @@ STATIC = Path(__file__).resolve().parent / "static"
 VERSION = (LAB / "VERSION").read_text().strip()
 SUITES = sorted(p.stem for p in (LAB / "tests" / "suites").glob("*.robot"))
 FLOW_MODES = ("compete", "solo")
-LIVE_MODES = (*FLOW_MODES, "live")   # runs that draw per-second samples
+LIVE_MODES = (*FLOW_MODES, "live")
+SWEEP_RTTS = (0, 15, 30, 60, 90)   # ms: the portal's RTT sweep (the WAN card's checkbox)   # runs that draw per-second samples
 BITRATE_MAX = 5000   # Mbit/s; 0 = iperf3 without -b
 
 app = FastAPI(title="tcp-cc-lab portal API", version="1.0", docs_url="/docs",
@@ -380,15 +381,17 @@ class Run(RunBase):
                    "live": "Live test"}
 
     def __init__(self, mode, options=None, resume_of=None):
-        self.result = None; self.node_stats = None; self.ctl = {"stop": False, "bitrate": None, "next": False}
+        self.rtt_restore = None; self.result = None; self.node_stats = None; self.ctl = {"stop": False, "bitrate": None, "next": False}
         super().__init__(mode, options, resume_of, runs_dir=RUNS_DIR, cwd=LAB)
         o = self.options
         if mode in FLOW_MODES:
             self.steps[0]["title"] = (f"{self.STEP_TITLES[mode]}: {', '.join(o['algos'])}, {o['duration']} s, "
                                       f"site {'A → B' if o['direction'] == 'a2b' else 'B → A'}" + (f", {o['stagger']} s apart" if o.get("stagger") else ""))
         if mode == "live":
-            self.steps[0]["title"] = (f"Live test: {', '.join(o['algos'])} one at a time, {o['slot_s']} s each, site {'A → B' if o['direction'] == 'a2b' else 'B → A'}, until stopped"
-                                      if o.get("sequential") else f"Live test: {', '.join(o['algos'])} at once, site {'A → B' if o['direction'] == 'a2b' else 'B → A'}, until stopped (at most {o['max_s']} s)")
+            if o.get("rtt_sweep"): o_sw = f", RTT sweep {'/'.join(f'{r:g}' for r in o['rtts'])} ms, {o['step_s']} s per RTT"
+            else: o_sw = ""
+            self.steps[0]["title"] = (f"Live test{o_sw}: {', '.join(o['algos'])} one at a time, {o['slot_s']} s each, site {'A → B' if o['direction'] == 'a2b' else 'B → A'}, until stopped"
+                                      if o.get("sequential") else f"Live test{o_sw}: {', '.join(o['algos'])} at once, site {'A → B' if o['direction'] == 'a2b' else 'B → A'}, until stopped (at most {o['max_s']} s)")
         if mode == "test" and o.get("suite"): self.steps[0]["title"] = f"Robot suite {o['suite']}"
 
     def plan(self): return [self.mode]
@@ -416,6 +419,14 @@ class Run(RunBase):
         seq = bool(o.get("sequential")); k = 0; hs = hs_all[:1] if seq else hs_all   # hs: the flows running now
         slot_end = t0 + (o.get("slot_s") or 0)
         self.ctl["bitrate"] = o.get("bitrate_mbit") or 0; segs, sent, last_w = [], {}, None
+        rtts = o.get("rtts") if o.get("rtt_sweep") else None; ri, step_end = 0, None   # RTT sweep: index of the RTT now, and when its step ends
+        def set_rtt(r, **extra):   # in place, like the WAN card; logged as a MARK (with extra, e.g. the next algorithm)
+            w_ = C.wan_apply(rtt_ms=r)["settings"]; _wan["t"] = 0
+            self.say("MARK " + json.dumps({"ts": round(time.time(), 2), **{k_: w_[k_] for k_ in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}, **extra}))
+        if rtts:
+            self.rtt_restore = (wan(fresh=True).get("settings") or {}).get("rtt_ms")   # put back when the run ends (after())
+            C.wan_apply(rtt_ms=rtts[0]); _wan["t"] = 0; step_end = time.time() + o["step_s"]
+            self.say(f"RTT sweep: {', '.join(f'{r:g}' for r in rtts)} ms, {o['step_s']} s each" + (", within each algorithm's turn" if seq else ""))
         def flow(h, br, tries=0):
             f = C.Flow(h, max(5, int((slot_end if seq else end) - time.time()) + 2), t0, bitrate=f"{br:g}M" if br else None)
             f.started_at, f.br, f.tries = time.time(), br, tries; f.start(); return f
@@ -451,9 +462,14 @@ class Run(RunBase):
                                                   "q_ms": round(d["backlog_bytes"] * 8 / (w["settings"]["rate_mbit"] * 1000), 2), "q_kb": round(d["backlog_bytes"] / 1000, 1)}))
                 last_w = w
             if seq and (self.ctl["next"] or time.time() >= slot_end) and k + 1 < len(hs_all):   # the next algorithm's turn
-                self.ctl["next"] = False; stop(fs); flush(fs); k += 1; hs[:] = [hs_all[k]]; slot_end = time.time() + o["slot_s"]
-                self.say("MARK " + json.dumps({"ts": round(time.time(), 2), "algo": hs[0]["cc"]})); fs = start(br); continue
+                self.ctl["next"] = False; stop(fs); flush(fs); k += 1; hs[:] = [hs_all[k]]
+                if rtts: ri = 0; set_rtt(rtts[0], algo=hs[0]["cc"]); step_end = time.time() + o["step_s"]   # its turn starts at the first RTT
+                else: self.say("MARK " + json.dumps({"ts": round(time.time(), 2), "algo": hs[0]["cc"]}))
+                slot_end = time.time() + o["slot_s"]; fs = start(br); continue
+            if rtts and time.time() >= step_end and ri + 1 < len(rtts):   # the sweep's next RTT, in place
+                ri += 1; set_rtt(rtts[ri]); step_end = time.time() + o["step_s"]
             if seq and self.ctl["next"]: self.ctl["next"] = False; break   # Next on the last algorithm ends the run
+            if rtts and not seq and ri + 1 == len(rtts) and time.time() >= step_end: break   # together: the sweep's last step is over
             if self.ctl["stop"] or time.time() >= end or (seq and time.time() >= slot_end) or all(not f.is_alive() for f in fs): break
             if self.ctl["bitrate"] != br:
                 br = self.ctl["bitrate"]; stop(fs); flush(fs)
@@ -463,7 +479,8 @@ class Run(RunBase):
         self.result = {"mode": "live", "direction": o["direction"], "algos": o["algos"], "wan": w0.get("settings"), "host_mtu": (mtu() or {}).get("host_mtu"),
                        "seconds": round(time.time() - t0, 1), "segments": segs, "path_drops": drops_since(d0)}
         self.result["sequential"] = seq
-        s["summary"] = f"{self.result['seconds']} s, " + (f"{k + 1} of {len(hs_all)} algorithms in turn" if seq else f"{len(segs) // max(1, len(hs))} bit-rate segment(s)")
+        if rtts: self.result["rtt_sweep"] = rtts
+        s["summary"] = f"{self.result['seconds']} s, " + (f"{k + 1} of {len(hs_all)} algorithms in turn" if seq else f"RTT sweep, {ri + 1} of {len(rtts)} steps" if rtts else f"{len(segs) // max(1, len(hs))} bit-rate segment(s)")
         bad = [g for g in segs if g["error"]]
         if bad: raise RuntimeError("; ".join(f"{g['cc']}: {g['error']}" for g in bad)[:300])
 
@@ -477,6 +494,9 @@ class Run(RunBase):
         self.record_tests(LAB / "results", s, self.sh([LAB / "tests" / "run.sh", *([f"suites/{suite}.robot"] if suite else [])], check=False))
 
     def after(self):
+        if getattr(self, "rtt_restore", None) is not None:   # an RTT sweep puts the RTT back as it was, however the run ended
+            try: C.wan_apply(rtt_ms=self.rtt_restore); self.say(f"RTT back to {self.rtt_restore:g} ms")
+            except Exception as e: self.say(f"could not put the RTT back: {e}")   # noqa: BLE001
         _wan["t"] = 0
         if self.mode in LIVE_MODES:   # keep the nodes' CPU / memory for the run's span with the run (the report needs it after a portal restart)
             t0 = (self.steps[0].get("started") or self.started) - 2
@@ -507,8 +527,13 @@ def start_run(req: RunRequest):
         o["stagger"] = float(o.get("stagger") or 0) if req.mode != "live" else 0
         if not 0 <= o["stagger"] <= 60: raise HTTPException(422, "options.stagger: 0 .. 60 s")
         if req.mode == "live":   # sequential: one algorithm at a time, slot_s each (Next moves on early)
-            o["sequential"] = bool(o.get("sequential"))
-            if o["sequential"]:
+            o["sequential"] = bool(o.get("sequential")); o["rtt_sweep"] = bool(o.get("rtt_sweep"))
+            if o["rtt_sweep"]:   # the RTT steps through SWEEP_RTTS, step_s each (one at a time: within each algorithm's turn)
+                o["rtts"] = list(SWEEP_RTTS); o["step_s"] = int(o.get("step_s") or 30)
+                if not 10 <= o["step_s"] <= 600: raise HTTPException(422, "options.step_s: 10 .. 600 s")
+                o["slot_s"] = o["step_s"] * len(o["rtts"]) if o["sequential"] else None
+                o["max_s"] = o["duration"] = o["step_s"] * len(o["rtts"]) * (len(o["algos"]) if o["sequential"] else 1) + 5 * len(o["algos"])
+            elif o["sequential"]:
                 o["slot_s"] = int(o.get("slot_s") or 60)
                 if not 10 <= o["slot_s"] <= 600: raise HTTPException(422, "options.slot_s: 10 .. 600 s")
                 o["max_s"] = o["duration"] = o["slot_s"] * len(o["algos"]) + 5 * len(o["algos"])

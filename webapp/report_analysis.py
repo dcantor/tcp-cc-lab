@@ -417,3 +417,87 @@ def chapter(c):
             find.append(f"<b>Sharing:</b> {LABEL[big]} took {100 * shares[big]:.0f} % of what the flows moved together" + (f"; {', '.join(LABEL[a] for a in small)} {'was' if len(small) == 1 else 'were'} squeezed below half an equal share." if small else "."))
         html.append(stx)
     return "".join(html), find
+
+
+def sweep_section(c):
+    """Chapter 4 for an RTT-sweep run: each algorithm's throughput and RTT at each step, a throughput-against-RTT figure, and what the
+    trend means. The first SETTLE seconds of each step are left out (the flows are still adjusting to the new RTT)."""
+    SETTLE = 3
+    algos, per, t0, phases, states, rtts = c["algos"], c["per"], c["t0"], c["phases"], c["states"], c["rtts"]
+    figure, table, chart, mss, br, wan0 = c["figure"], c["table"], c["chart"], c["mss"], c["br"], c["wan0"]
+    acc = {(a, r): [] for a in algos for r in rtts}
+    for a in algos:
+        for s in per[a]:
+            t = s["ts"] - t0
+            k = next((k for k, (a0, a1, _, _) in enumerate(phases) if a0 < t <= a1), None)
+            if k is None or k >= len(states): continue
+            r = states[k].get("rtt_ms")
+            if r in rtts and t - phases[k][0] > SETTLE: acc[(a, r)].append(s)
+    def m(a, r, key):
+        v = [x[key] for x in acc[(a, r)] if x.get(key) is not None]
+        return st.mean(v) if v else None
+    R = wan0.get("rate_mbit") or 0
+    rows = []
+    for r in rtts:
+        bdp = R * 1e6 / 8 * r / 1000 if R else 0
+        rows.append(f"<tr><td class='num'>{r:g} ms</td><td class='num'>{f"{fmt(bdp / 1e6, 2)} MB" if bdp else "≈ 0"}</td>"
+                    + "".join(f"<td class='num'>{fmt(m(a, r, 'mbps'))}</td>" for a in algos)
+                    + "".join(f"<td class='num'>{fmt(m(a, r, 'rtt_ms'))}</td>" for a in algos) + "</tr>")
+    head = ("<tr><th class='num'>RTT set</th><th class='num'>BDP</th>" + "".join(f"<th class='num'>{sw(a)} Mbit/s</th>" for a in algos)
+            + "".join(f"<th class='num'>{LABEL[a]} RTT (ms)</th>" for a in algos) + "</tr>")
+    ser = [(a, LABEL[a], [(r, m(a, r, "mbps")) for r in rtts if m(a, r, "mbps") is not None]) for a in algos]
+    out = ["<h3>Throughput across the RTT sweep</h3>"
+           f"<p>The RTT stepped through {', '.join(f'{r:g}' for r in rtts)} ms" + (f", {c['step_s']} s at each" if c.get("step_s") else "")
+           + (", within each algorithm's own turn, so each algorithm met every RTT alone." if c.get("seq") else ", with the flows running together throughout, so they shared the bottleneck at every RTT.")
+           + f" The table gives each flow's mean over each step, leaving out its first {SETTLE} s while it adjusted. "
+           "The BDP is the bottleneck rate times the RTT: the window a flow needs to fill the link at that RTT.</p>",
+           table(f"<table>{head}{''.join(rows)}</table>", "Throughput and RTT at each step of the sweep", f"Means of the per-second samples, without each step's first {SETTLE} s"),
+           figure(chart(ser, "Mbit/s", max(rtts) * 1.05 or 1, xunit=" ms", dots=True), "Throughput against RTT", "Mean throughput at each RTT step; x: the RTT set on the WAN")]
+    txt = []
+    lo = next((r for r in rtts if r > 0), rtts[0]); hi = rtts[-1]
+    for a in algos:
+        dips = []
+        if a == "bbr":   # a step right after a shorter RTT, far below BBR's typical rate: its min-RTT filter still held the shorter RTT
+            vals = [m(a, r, "mbps") for r in rtts]; known = [v for v in vals if v is not None]; med = st.median(known) if known else None
+            dips = [r for i, r in enumerate(rtts) if i and med and vals[i] is not None and vals[i] < 0.5 * med and rtts[i - 1] < r]
+        base = [r for r in rtts if r > 0 and r not in dips]
+        lo = base[0] if base else next((r for r in rtts if r > 0), rtts[0])
+        a_lo, a_hi = m(a, lo, "mbps"), m(a, hi, "mbps")
+        if not a_lo or a_hi is None: continue
+        if dips:
+            d0 = dips[0]; prev = rtts[rtts.index(d0) - 1]; prtt = m(a, prev, "rtt_ms") or 1
+            whole = c.get("step_s") and c["step_s"] <= 12
+            txt.append(f"<p><b>BBR at {', '.join(f'{r:g}' for r in dips)} ms</b> reached only {', '.join(fmt(m(a, r, 'mbps')) for r in dips)} Mbit/s, far below its other steps. "
+                       f"It came from the {prev:g} ms step with a minimum RTT of about {fmt(prtt)} ms in its 10-second filter, so it took the BDP to be about "
+                       f"{max(1, d0 / max(prtt, 0.5)):,.0f}× smaller than it was and capped its window at twice that estimate. The filter lets go of the old minimum only after 10 s"
+                       + (f", as long as the step itself ({c['step_s']} s): the whole step ran with the stale estimate. Steps of 30 s or more show its settled rate." if whole else
+                          ", so the first part of the step ran with the stale estimate.") + " The trend below leaves this step out.</p>")
+        ch = a_hi / a_lo
+        trend = (f"held steady from {lo:g} to {hi:g} ms" if 0.85 <= ch <= 1.15 else (f"fell to {100 * ch:.0f} %" if ch < 1 else f"rose to {100 * ch:.0f} %") + f" of its {lo:g} ms level at {hi:g} ms") + f" ({fmt(a_lo)} → {fmt(a_hi)} Mbit/s)"
+        capped = br and a_lo >= 0.95 * br and a_hi >= 0.95 * br
+        if a == "reno":
+            why = ("Reno grows its window by one segment per round trip, so at a longer RTT it regains a lost window more slowly in seconds, and at a fixed loss rate its throughput falls as 1/RTT (the Mathis model): "
+                   f"going from {lo:g} to {hi:g} ms would cut a loss-limited Reno flow to {100 * lo / hi:.0f} %.")
+        elif a == "cubic":
+            why = ("CUBIC grows its window as a function of time, not round trips, so it loses much less than Reno at long RTTs: in its cubic region a loss-limited flow's throughput falls only as RTT<sup>−¼</sup> "
+                   f"({100 * (lo / hi) ** 0.25:.0f} % from {lo:g} to {hi:g} ms). At short RTTs it runs in its Reno-friendly region and behaves like Reno.")
+        else:
+            why = ("BBR paces at its bandwidth estimate and sizes its window from its own BDP estimate, so in principle the RTT does not change its rate; it needs a window of about twice the BDP, "
+                   "and each step to a longer RTT leaves it with a stale, too-low minimum RTT for up to 10 s, which can show as a dip at the start of the step.")
+        txt.append(f"<p><b>{LABEL[a]}</b> {trend}" + (": it was held at the -b cap throughout, so the sweep shows nothing about its response to RTT. " if capped else ". ") + why + "</p>")
+    if not c.get("seq") and len(algos) > 1:   # together: the shares, not the RTT alone, set the loss-based flows' numbers
+        tot = {r: sum(m(a, r, "mbps") or 0 for a in algos) for r in rtts}
+        dom = [(a, st.mean([(m(a, r, "mbps") or 0) / tot[r] for r in rtts if tot[r]])) for a in algos]
+        big = max(dom, key=lambda x: x[1])
+        if big[1] > 1.5 / len(algos):
+            txt.insert(0, f"<p><b>Read the loss-based flows' numbers with care.</b> The flows shared the bottleneck, and {LABEL[big[0]]} took on average {100 * big[1]:.0f} % of what they moved together at each step. "
+                          "The others' throughput at each RTT is therefore mostly what was left to them, not their own response to the RTT. To measure each algorithm's response alone, "
+                          "run the sweep with <b>One at a time</b>.</p>")
+    rmem = c.get("rmem_max")
+    if rmem:
+        ceil = rmem / 2 * 8 / (hi / 1000) / 1e6 if hi else None
+        txt.append(f"<p>A flow's rate can never exceed its window divided by the RTT. The hosts allow a receive buffer of up to {rmem / 2 ** 20:.0f} MiB, of which roughly half is advertised as window, "
+                   + (f"so at {hi:g} ms no flow can exceed about {fmt(ceil)} Mbit/s" + (", which is below the bottleneck: at the longest RTTs the receive window, not the algorithm, may be the limit." if R and ceil < R else ", above what these flows reached: the receive window was not the limit here.") if ceil else "")
+                   + "</p>")
+    txt.append(f"<p>The {rtts[0]:g} ms step is not a zero RTT: the virtual machines and their bridges add about 1 ms of their own, so it behaves like a LAN.</p>" if rtts[0] == 0 else "")
+    return "".join(out) + "".join(txt)

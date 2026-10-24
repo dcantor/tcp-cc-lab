@@ -76,6 +76,12 @@ One at a time** sets whether the chosen algorithms share the bottleneck or each 
 While a flow run goes, a **countdown** under the controls shows the time left, with a progress bar. For one-at-a-time
 runs it also shows the running algorithm's time left in its turn. The Run card shows the elapsed time of any run.
 
+**RTT sweep**: the "sweep 0–90 ms" checkbox next to Round-trip time makes a flow run step the RTT through 0, 15,
+30, 60 and 90 ms, in place, for "each RTT for" seconds at each. With the flows together they share the bottleneck
+at every step; one at a time, each algorithm's turn steps through all five. The run ends after the last step and puts
+the RTT back. The PDF report adds a throughput-against-RTT table and figure. Use steps of 30 s or more: BBR keeps a
+shorter RTT in its min-RTT filter for up to 10 s after the RTT goes up.
+
 **Live test** (the portal's default flow mode): the chosen algorithms run until you press Stop. Together, they run at
 once (at most 2–30 min). One at a time, each runs alone for the time set, and the run ends after the last. The WAN and
 bit-rate controls act on whichever flow is running, and the charts mark where each algorithm starts. Four charts update every second, with a time grid every 5 s: throughput,
