@@ -326,6 +326,7 @@ def chapter(c):
         for k in range(1, len(phases)):
             a0, a1, nm, row = phases[k]; prev = phases[k - 1][3]; s0, s1 = states[k - 1] if k - 1 < len(states) else {}, states[k] if k < len(states) else {}
             ch = {key: (s0.get(key), s1.get(key)) for key in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp", "bitrate_mbit") if s1.get(key) is not None and s0.get(key) != s1.get(key)}
+            if not ch and s1.get("algo") != s0.get("algo"): continue   # one at a time: the next algorithm's turn, not a change to compare
             why = []
             if "loss_pct" in ch:
                 up = (ch["loss_pct"][1] or 0) > (ch["loss_pct"][0] or 0)
@@ -365,7 +366,7 @@ def chapter(c):
                 resp.append(f"{LABEL[a]} {fmt(b_)} → {fmt(a_)} Mbit/s (" + ("unchanged" if abs(d) < 0.01 else f"{'+' if d > 0 else '−'}{abs(100 * d):.0f} %") + (f", settled in about {settle} s" if settle else "") + ")")
                 e = exp["bbr" if a == "bbr" else "lb"]
                 if e is not None:
-                    got = 0 if abs(d) < 0.05 else (1 if d > 0 else -1)
+                    got = 0 if abs(d) < (0.10 if e == 0 else 0.05) else (1 if d > 0 else -1)   # "holds its rate": within 10 % (its retransmits come out of its throughput)
                     capped = br and e > 0 and b_ >= 0.95 * br
                     ok.append((LABEL[a], got == e or capped, mode != "solo" and n > 1 and tot_prev and (b_ or 0) / tot_prev < 0.5 / n))
             names = {"rtt_ms": "RTT", "rate_mbit": "bottleneck", "loss_pct": "random loss", "buffer_bdp": "buffer", "bitrate_mbit": "sender bit rate"}
@@ -380,7 +381,7 @@ def chapter(c):
                               f"competition, not this setting, set {'its' if len(squeezed) == 1 else 'their'} rate; the change shifted the balance between the flows instead. " if squeezed else "")
                            + ("" if len(squeezed) == len(bad) else "another limit was tighter in this phase, or the phase was too short for the flow to settle. See the per-second figures.") + "</p>")
             prow.append(f"<div class='phase'><h4>At {a0:.0f} s: {E(chg)}</h4><p>{'; '.join(resp)}.</p><p>{' '.join(why)}</p>{verdict}</div>")
-        html.append("<h3>Phase by phase</h3><p>Each change during the run is a small experiment: the same flows, before and after one setting moved. "
+        if prow: html.append("<h3>Phase by phase</h3><p>Each change during the run is a small experiment: the same flows, before and after one setting moved. "
                     "For each change, the mean throughput of each flow before and after it, how long the new phase took to settle (three seconds in a row within 15 % of the phase's median), "
                     "and what the algorithms' design predicts.</p>" + "".join(prow))
 

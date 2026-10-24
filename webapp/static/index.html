@@ -120,12 +120,14 @@ input[type=range] { width:100%; accent-color:var(--accent); height:28px; }
     <section class="card">
       <h2>Flows <span class="mute small" id="flowsSub">— one TCP flow per algorithm, each site A host to its site B peer (iperf3)</span></h2>
       <div class="row">
-        <span class="seg" id="modeSeg"><button data-m="live" class="on">Live (until stopped)</button><button data-m="compete">Compete (all at once)</button><button data-m="solo">Solo (one at a time)</button></span>
+        <span class="seg" id="kindSeg" title="Live: runs until you press Stop, and the WAN and bit-rate controls act on the running flows. Timed: a fixed-length test."><button data-k="live" class="on">Live (until stopped)</button><button data-k="timed">Timed</button></span>
+        <span class="seg" id="orderSeg" title="Together: the algorithms' flows run at the same time and share the bottleneck. One at a time: each algorithm runs alone, in turn."><button data-o="together" class="on">Together</button><button data-o="seq">One at a time</button></span>
         <label class="mute small" for="dur" id="durLbl">stop after</label><select id="dur"></select>
         <label class="mute small" for="dir">direction</label><select id="dir"><option value="a2b">site A → B</option><option value="b2a">site B → A</option></select>
         <label class="mute small" for="stag">start</label><select id="stag"><option value="0">together</option><option value="5">5 s apart</option><option value="10">10 s apart</option></select>
         <span class="row small" id="algoPick"></span>
         <button class="primary" id="goBtn">Start</button>
+        <button id="nextBtn" style="display:none" title="end this algorithm's flow now and start the next one's">Next ▸</button><span id="seqNow" class="small"></span>
         <button id="pdfBtn" disabled title="a PDF of the run shown below: setup, changes, per-second charts, results, nodes' CPU and memory (once the run has finished)">⤓ PDF report</button><span id="pdfMsg" class="small"></span>
       </div>
       <div class="ctl" style="margin-top:12px">
@@ -285,7 +287,7 @@ function syncPos(c, v, running, lf = null) {   // lf: label format for the shown
   lbl.textContent = lf ? `${lf(Math.max(0, v.xmin))}–${lf(v.xmax)}` : `${Math.round(v.fits ? 0 : v.xmin)}–${Math.round(v.xmax)} s`;
   b.style.display = VIEW[c] != null && !v.fits ? '' : 'none'; b.textContent = running ? 'Live' : 'End';
 }
-const MARK_KEYS = [['rtt_ms', v => `RTT ${v} ms`], ['rate_mbit', v => `${v} Mbit/s link`], ['loss_pct', v => `loss ${v} %`], ['buffer_bdp', v => `buffer ${v} BDP`], ['bitrate_mbit', v => `-b ${brText(v)}`]];
+const MARK_KEYS = [['algo', v => `${LABEL[v] || v} starts`], ['rtt_ms', v => `RTT ${v} ms`], ['rate_mbit', v => `${v} Mbit/s link`], ['loss_pct', v => `loss ${v} %`], ['buffer_bdp', v => `buffer ${v} BDP`], ['bitrate_mbit', v => `-b ${brText(v)}`]];
 function markLabels(d) {
   let prev = {...(d.wan0 || {}), bitrate_mbit: d.bitrate0};
   return d.marks.map(m => { const ch = MARK_KEYS.filter(([k]) => k in m && m[k] !== prev[k]).map(([k, f]) => f(m[k])); prev = {...prev, ...m}; return ch.join(', ') || 'WAN set'; });
@@ -313,6 +315,7 @@ function drawCharts() {
   $('#legend').innerHTML = (d.algos || ALGOS).map(a => `<span><i style="background:${color(a)}"></i>${LABEL[a]} <span class="mute">(${d.direction === 'b2a' ? 'b' : 'a'}-${a})</span></span>`).join('');
   // the latest second, per algorithm
   const last = {}; for (const s of d.samples) last[s.cc] = s;
+  if (d.current) for (const k of Object.keys(last)) if (k !== d.current) delete last[k];   // one at a time: only the running algorithm
   const lw = (d.wanS || []).at(-1);
   const st = s => `<span style="margin-right:12px"><span class="sw" style="background:${color(s.cc)}"></span>${LABEL[s.cc]} <b>${fmt(s.mbps)}</b> Mbit/s · ${fmt(s.rtt_ms)} ms · ${s.retr || 0} retr</span>`;
   $('#liveNow').innerHTML = d.running && Object.keys(last).length ? '<span class="mute">now:</span> ' + Object.values(last).map(st).join('') +
@@ -364,7 +367,7 @@ function liveTable(r) {
   const w = r.wan || {};
   const rows = r.segments.map(g => `<tr><td><span class="sw" style="background:${color(g.cc)}"></span>${LABEL[g.cc]}${g.cc_reported && g.cc_reported !== g.cc ? ` <span class="bad">(kernel said ${esc(g.cc_reported)})</span>` : ''}</td>
     <td class="num">${brText(g.bitrate_mbit)}</td><td class="num">${g.from_s} – ${g.to_s} s</td><td class="num">${g.mbps}</td><td class="num">${g.retransmits}</td><td class="num">${g.rtt_ms.min}</td><td class="num">${g.rtt_ms.mean}</td><td class="num">${g.rtt_ms.max}</td><td class="bad small">${esc(g.error || '')}</td></tr>`).join('');
-  return `<div class="small mute">Live test, ${r.seconds} s, site ${r.direction === 'a2b' ? 'A → B' : 'B → A'}; WAN at the start: RTT ${w.rtt_ms} ms, ${w.rate_mbit} Mbit/s, loss ${w.loss_pct} %, buffer ${w.buffer_bdp} × BDP. One row per flow: a new flow starts at each bit-rate change.</div>
+  return `<div class="small mute">Live test${r.sequential ? ', one algorithm at a time' : ''}, ${r.seconds} s, site ${r.direction === 'a2b' ? 'A → B' : 'B → A'}; WAN at the start: RTT ${w.rtt_ms} ms, ${w.rate_mbit} Mbit/s, loss ${w.loss_pct} %, buffer ${w.buffer_bdp} × BDP. One row per flow: a new flow starts at each bit-rate change${r.sequential ? ' and with each algorithm' : ''}.</div>
     <div class="scroll"><table><tr><th>Algorithm</th><th class="num">-b</th><th class="num">Time</th><th class="num">Mbit/s</th><th class="num">Retransmits</th><th class="num">RTT min</th><th class="num">mean</th><th class="num">max (ms)</th><th></th></tr>${rows}</table></div>`;
 }
 function flowTable(r) {
@@ -508,12 +511,19 @@ $('#br').addEventListener('change', async e => {
   try { await post('/api/live/bitrate', {bitrate_mbit: v}); $('#wanMsg').innerHTML = `<span class="okc">-b ${brText(v)}: new flows starting</span>`; }
   catch (x) { $('#wanMsg').innerHTML = `<span class="bad">${esc(x.message)}</span>`; }
 });
-const DUR = {live: [[120, '2 min'], [300, '5 min'], [600, '10 min'], [900, '15 min'], [1800, '30 min']], compete: [[20, '20 s'], [30, '30 s'], [60, '60 s'], [120, '120 s']], solo: [[20, '20 s'], [30, '30 s'], [60, '60 s'], [120, '120 s']]};
-function setMode(m) {
-  MODE = m; document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('on', x.dataset.m === m));
-  $('#dur').innerHTML = DUR[m].map(([v, t]) => `<option value="${v}">${t}</option>`).join(''); $('#dur').value = m === 'live' ? 600 : m === 'compete' ? 30 : 20;
-  $('#durLbl').textContent = m === 'live' ? 'stop after' : 'duration'; $('#stag').disabled = m !== 'compete'; $('#liveHelp').style.display = m === 'live' ? '' : 'none';
+const DUR = {live: [[120, '2 min'], [300, '5 min'], [600, '10 min'], [900, '15 min'], [1800, '30 min']], liveSeq: [[30, '30 s'], [60, '60 s'], [120, '2 min'], [300, '5 min'], [600, '10 min']],
+             compete: [[20, '20 s'], [30, '30 s'], [60, '60 s'], [120, '120 s']], solo: [[20, '20 s'], [30, '30 s'], [60, '60 s'], [120, '120 s']]};
+let KIND = 'live', SEQ = false;   // the two toggles; MODE follows: live (either order), compete (timed, together), solo (timed, one at a time)
+function setMode() {
+  MODE = KIND === 'live' ? 'live' : SEQ ? 'solo' : 'compete'; const d = MODE === 'live' && SEQ ? 'liveSeq' : MODE;
+  document.querySelectorAll('#kindSeg button').forEach(x => x.classList.toggle('on', x.dataset.k === KIND));
+  document.querySelectorAll('#orderSeg button').forEach(x => x.classList.toggle('on', (x.dataset.o === 'seq') === SEQ));
+  $('#dur').innerHTML = DUR[d].map(([v, t]) => `<option value="${v}">${t}</option>`).join(''); $('#dur').value = {live: 600, liveSeq: 60, compete: 30, solo: 20}[d];
+  $('#durLbl').textContent = d === 'live' ? 'stop after' : SEQ ? 'each for' : 'duration'; $('#stag').disabled = MODE !== 'compete'; $('#liveHelp').style.display = MODE === 'live' ? '' : 'none';
+  $('#liveHelp').innerHTML = MODE === 'live' && SEQ ? LIVE_HELP_SEQ : LIVE_HELP;
 }
+const LIVE_HELP = $('#liveHelp').innerHTML;
+const LIVE_HELP_SEQ = 'Live, one at a time: each algorithm runs alone for the time set, in turn (CUBIC, BBR, Reno), and the run ends after the last. <b>Next ▸</b> moves on early; Stop ends it. The WAN and bit-rate controls act on the flow that is running, as in a live test with the flows together; the charts mark where each algorithm starts.';
 function pdfButton() {   // the report is for the run shown, once it has finished
   const ok = RUN && ['compete', 'solo', 'live'].includes(RUN.mode) && ['success', 'failed'].includes(RUN.status);
   $('#pdfBtn').disabled = !ok || $('#pdfBtn').dataset.busy === '1';
@@ -533,11 +543,21 @@ $('#pdfBtn').onclick = async () => {
 };
 function goButton() {
   const g = liveGoing(); $('#goBtn').textContent = g ? 'Stop' : 'Start'; $('#goBtn').classList.toggle('primary', !g);
+  const sq = g && RUN.options?.sequential; $('#nextBtn').style.display = sq ? '' : 'none';
+  if (g && (KIND !== 'live' || SEQ !== !!sq)) { KIND = 'live'; SEQ = !!sq; setMode(); }   // the toggles show how the running test runs
+  if (sq) {   // which algorithm is running, from the START / MARK lines
+    const order = RUN.options.algos || [], cur = [...parseLines(RUN.log, 'START'), ...parseLines(RUN.log, 'MARK')].filter(m => m.algo).map(m => m.algo).pop() || order[0], i = order.indexOf(cur);
+    if ($('#nextBtn').dataset.cur !== cur) { $('#nextBtn').dataset.cur = cur; $('#nextBtn').disabled = false; }
+    $('#nextBtn').textContent = i + 1 < order.length ? `Next ▸ ${LABEL[order[i + 1]]}` : 'Finish ▸';
+    $('#seqNow').innerHTML = `now: <b>${LABEL[cur] || cur}</b> (${i + 1} of ${order.length})`;
+  } else $('#seqNow').textContent = '';
   $('#goBtn').disabled = !g && !(STATE && STATE.all_up);
 }
 function algosChosen() { return ALGOS.filter(a => $('#al_' + a).checked); }
 $('#algoPick').innerHTML = ALGOS.map(a => `<label><input type="checkbox" id="al_${a}" checked> <span class="sw" style="background:${color(a)}"></span>${LABEL[a]}</label>`).join(' ');
-document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+document.querySelectorAll('#kindSeg button').forEach(b => b.onclick = () => { if (!liveGoing()) { KIND = b.dataset.k; setMode(); } });
+document.querySelectorAll('#orderSeg button').forEach(b => b.onclick = () => { if (!liveGoing()) { SEQ = b.dataset.o === 'seq'; setMode(); } });
+$('#nextBtn').onclick = async () => { try { await post('/api/live/next', {}); $('#nextBtn').disabled = true; } catch (e) { $('#wanMsg').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } };
 $('#win').addEventListener('input', e => { WIN = +e.target.value > 300 ? 0 : +e.target.value; drawCharts(); });
 document.querySelectorAll('.pos').forEach(el => {
   const c = el.dataset.c, r = el.querySelector('input');
@@ -552,11 +572,11 @@ document.querySelectorAll('.pos[data-c="cCpu"], .pos[data-c="cMem"]').forEach(el
   r.addEventListener('change', () => { delete r.dataset.drag; drawStats(); });
   el.querySelector('button').onclick = () => { VIEW[c] = null; drawStats(); };
 });
-setMode('live'); showBr(BR[+$('#br').value]);
+setMode(); showBr(BR[+$('#br').value]);
 $('#goBtn').onclick = async () => {
   if (liveGoing()) { try { await post('/api/live/stop', {}); $('#goBtn').disabled = true; $('#goBtn').textContent = 'stopping…'; } catch (e) { $('#run').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } return; }
   const br = BR[+$('#br').value], o = {direction: $('#dir').value, algos: algosChosen(), bitrate_mbit: br};
-  startRun(MODE, MODE === 'live' ? {...o, max_s: +$('#dur').value} : {...o, duration: +$('#dur').value, stagger: MODE === 'compete' ? +$('#stag').value : 0});
+  startRun(MODE, MODE === 'live' ? (SEQ ? {...o, sequential: true, slot_s: +$('#dur').value} : {...o, max_s: +$('#dur').value}) : {...o, duration: +$('#dur').value, stagger: MODE === 'compete' ? +$('#stag').value : 0});
 };
 $('#verifyBtn').onclick = () => startRun('verify', {});
 $('#testBtn').onclick = () => startRun('test', {});
@@ -571,7 +591,7 @@ async function pollRun() {
   if (!RUN) return;
   const id = RUN.id, d = await api(`/api/runs/${id}?since=${runSince}`).catch(() => null);
   if (!d || !RUN || RUN.id !== id) return;
-  RUN.log = [...RUN.log, ...d.log]; RUN.status = d.status; RUN.mode = d.mode; runSince = d.log_offset + d.log.length;
+  RUN.log = [...RUN.log, ...d.log]; RUN.status = d.status; RUN.mode = d.mode; RUN.options = d.options || {}; runSince = d.log_offset + d.log.length;
   if (['compete', 'solo', 'live'].includes(d.mode)) {
     const o = d.options || {}, n = (o.algos || ALGOS).length, marks = parseLines(RUN.log, 'MARK');
     const running = ['queued', 'running'].includes(d.status), w = lastWan && lastWan.settings;
@@ -579,7 +599,7 @@ async function pollRun() {
     const start = parseLines(RUN.log, 'START')[0];
     chartData = {mode: d.mode, running, samples: parseLines(RUN.log, 'SAMPLE'), wanS: parseLines(RUN.log, 'WAN'), marks, algos: o.algos, direction: o.direction,
       t0: d.mode === 'live' ? d.steps[0].started : null, wan0: start || d.result?.wan, bitrate0: o.bitrate_mbit || 0, bitrateNow: brNow,
-      wanNow: running ? w : d.result?.wan, duration: d.mode === 'solo' ? (o.duration + 2) * n : o.duration + (o.stagger || 0) * (n - 1) + 2};
+      wanNow: running ? w : d.result?.wan, current: o.sequential && running ? [start, ...marks].filter(m => m && m.algo).map(m => m.algo).pop() : null, duration: d.mode === 'solo' ? (o.duration + 2) * n : o.duration + (o.stagger || 0) * (n - 1) + 2};
     if (running && d.mode === 'live' && !$('#br').dataset.drag) { $('#br').value = nearest(BR, brNow); showBr(brNow); }
     drawCharts();
     $('#flowRes').innerHTML = d.result ? flowTable(d.result) : `<span class="mute small">${running ? (d.mode === 'live' ? 'live — move the sliders and watch each algorithm react; Stop ends it' : 'running — move the RTT slider to see each algorithm react') : esc(d.status)}</span>`;

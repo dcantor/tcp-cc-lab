@@ -62,8 +62,17 @@ collected live:
 - wanem: `wanem show`, its defaults, the bridge, offloads, the control script;
 - r1 and r2: `show configuration commands` with the password hash redacted, interfaces, routes, version.
 
-**Live test** (the portal's default flow mode): the chosen algorithms run at once until you press Stop (at most 2–30
-min). Four charts update every second, with a time grid every 5 s: throughput,
+**Flow modes**: two toggles on the Flows card. **Live (until stopped) / Timed** sets how a run ends. **Together /
+One at a time** sets whether the chosen algorithms share the bottleneck or each run alone, in turn (CUBIC, BBR, Reno):
+
+| | Together | One at a time |
+|---|---|---|
+| **Live** | `live`: until Stop (at most 2–30 min) | `live` with `sequential`: each for 30 s – 10 min; **Next ▸** moves on early |
+| **Timed** | `compete` (20–120 s) | `solo` (20–120 s each) |
+
+**Live test** (the portal's default flow mode): the chosen algorithms run until you press Stop. Together, they run at
+once (at most 2–30 min). One at a time, each runs alone for the time set, and the run ends after the last. The WAN and
+bit-rate controls act on whichever flow is running, and the charts mark where each algorithm starts. Four charts update every second, with a time grid every 5 s: throughput,
 the sender's smoothed RTT, retransmits per second, and the bottleneck queue at wanem. The **Window** slider sets the
 window from 5 s to 300 s in 5 s steps, or the whole run. Each chart has its own horizontal slider underneath (5 s
 steps) to slide that chart back through the run's history, during the test or after it; its "Live" button returns to now.
@@ -75,8 +84,9 @@ While it runs you can move:
   is a new TCP connection that starts in slow start.
 
 Each change is marked on the charts. When the test ends, a table shows one row per flow and bit rate. API:
-`POST /api/runs {"mode": "live", "options": {"algos", "bitrate_mbit", "max_s"}}`, then `POST /api/live/bitrate` and
-`POST /api/live/stop`. Compete and solo runs also take `bitrate_mbit`.
+`POST /api/runs {"mode": "live", "options": {"algos", "bitrate_mbit", "max_s"}}`, or one at a time
+`{"sequential": true, "slot_s": 60}` instead of `max_s`. Then `POST /api/live/bitrate`, `POST /api/live/next`
+(one at a time: the next algorithm now) and `POST /api/live/stop`. Compete and solo runs also take `bitrate_mbit`.
 
 ## MTU
 

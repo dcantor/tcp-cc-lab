@@ -103,7 +103,7 @@ def lines(log, tag):
 
 def mark_labels(marks, start):
     prev, out = dict(start), []
-    keys = [("rtt_ms", lambda v: f"RTT {v:g} ms"), ("rate_mbit", lambda v: f"{v:g} Mbit/s link"), ("loss_pct", lambda v: f"loss {v:g} %"),
+    keys = [("algo", lambda v: f"{LABEL.get(v, v)} starts"), ("rtt_ms", lambda v: f"RTT {v:g} ms"), ("rate_mbit", lambda v: f"{v:g} Mbit/s link"), ("loss_pct", lambda v: f"loss {v:g} %"),
             ("buffer_bdp", lambda v: f"buffer {v:g} × BDP"), ("bitrate_mbit", lambda v: f"-b {f'{v:g}M' if v else 'unlimited'}")]
     for m in marks:
         ch = [f(m[k]) for k, f in keys if k in m and m[k] != prev.get(k)]
@@ -223,6 +223,7 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     t0 = start["ts"] if start else (min(s["ts"] for s in samples) - 1 if samples else started)
     wan0 = start or res.get("wan") or {}
     algos = o.get("algos") or [f["cc"] for f in res.get("flows", [])]
+    seq = mode == "live" and bool(o.get("sequential"))   # live, one algorithm at a time
     xmax = max([s["ts"] - t0 for s in samples] + [w["ts"] - t0 for w in wans] + [5]) + 1   # the run's own length (a live run's max_s is only a cap)
     labels = mark_labels(marks, {**wan0, "bitrate_mbit": o.get("bitrate_mbit") or 0})
     mk = [(m["ts"] - t0, lb) for m, lb in zip(marks, labels)]
@@ -291,7 +292,7 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     chg = ("<table><tr><th class='num'>At</th><th>Change</th></tr>" + "".join(f"<tr><td class='num'>{x:.1f} s</td><td>{E(lb)}</td></tr>" for x, lb in mk) + "</table>") if mk else "<p class='note'>No changes: the WAN and the bit rate stayed as set at the start.</p>"
     mtu = res.get("host_mtu")
     setup = [("Run", f"<span class='mono'>{E(run['id'])}</span> · {E(run['status'])}" + (f" · <span class='bad'>{E(run.get('error') or '')}</span>" if run.get("error") else "")),
-             ("Mode", E(MODE_TEXT.get(mode, mode))),
+             ("Mode", E("Live: each algorithm alone, in turn, until stopped" if seq else MODE_TEXT.get(mode, mode))),
              ("When", f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(started))} – {time.strftime('%H:%M:%S', time.localtime(finished))} ({finished - started:.0f} s)"),
              ("Flows", f"{E(hosts)} ({dirn}); one TCP connection each"),
              ("Traffic", f"<span class='mono'>{cmd}</span>" + ("" if mode != "compete" or not o.get("stagger") else f"; started {o['stagger']:g} s apart")),
@@ -313,9 +314,11 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
         summary = (f"Each algorithm ran alone, one after the other, for {o.get('duration')} s each, with {wtxt}. "
                    + ", ".join(f"{ln(a)} reached {fmt(v)} Mbit/s" for a, v in rank) + f" ({100 * rank[0][1] / max(wan0.get('rate_mbit') or 1, 1e-9):.0f} % of the bottleneck for the fastest)." if rank else "")
     else:
-        summary = (f"The flows ran together for {res.get('seconds', 0):g} s, starting with {wtxt} and "
+        summary = ((f"The algorithms ran one at a time, up to {o.get('slot_s')} s each, {res.get('seconds', 0):g} s in all, starting with {wtxt} and " if seq else
+                f"The flows ran together for {res.get('seconds', 0):g} s, starting with {wtxt} and ")
                    + (f"a sender bit rate of {br:g} Mbit/s per flow. " if br else "no sender bit-rate limit. ")
-                   + (f"{len(mk)} change{'s were' if len(mk) != 1 else ' was'} made while they ran (section 3). " if mk else "Nothing was changed while they ran. ")
+                   + (lambda nch: f"{nch} change{'s were' if nch != 1 else ' was'} made while they ran (section 3). " if nch else "Nothing was changed while they ran. ")(
+                       len([m for m in marks if set(m) - {"ts", "algo"}]))
                    + "Averaged over the run (time-weighted across the flows' segments): " + ", ".join(f"{ln(a)} {fmt(v)} Mbit/s" for a, v in rank) + ".")
     if run.get("error"): summary += f" The run ended with an error: {run['error']}."
 
@@ -355,7 +358,7 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
     # ---- section 3: how this run was tested
     how = {"compete": f"All {len(algos)} flows started together{f' ({o.get('stagger'):g} s apart)' if o.get('stagger') else ''} and ran for {o.get('duration')} s, competing for the one bottleneck. This shows how the algorithms share a link: who takes what, how fair that is, and what each one does to the queue and to the others' RTT.",
            "solo": f"Each algorithm ran alone for {o.get('duration')} s, one after the other with 2 s between them, so the bottleneck was never shared. This shows what each algorithm achieves on this path by itself.",
-           "live": "The flows ran together until the run was stopped. While they ran, the WAN and the sender bit rate could be changed from the portal, and each change is listed below with its time. WAN changes apply in place to the running flows. iperf3 cannot change its bit rate during a test, so a bit-rate change stops the flows (SIGINT, so iperf3 ends its test cleanly) and starts new ones with the new -b. Each new flow is a new TCP connection and starts in slow start."}[mode]
+           "live": f"Each algorithm ran alone, in turn ({', '.join(ln(a) for a in algos)}), for up to {o.get('slot_s')} s each; the next one's flow started as soon as the previous one was stopped (at the end of its time, or earlier with Next in the portal), so the bottleneck was never shared. While they ran, the WAN and the sender bit rate could be changed from the portal, and each change is listed below with its time, together with where each algorithm started. WAN changes apply in place to the running flow. iperf3 cannot change its bit rate during a test, so a bit-rate change stops the flow (SIGINT, so iperf3 ends its test cleanly) and starts a new one with the new -b, from slow start." if seq else "The flows ran together until the run was stopped. While they ran, the WAN and the sender bit rate could be changed from the portal, and each change is listed below with its time. WAN changes apply in place to the running flows. iperf3 cannot change its bit rate during a test, so a bit-rate change stops the flows (SIGINT, so iperf3 ends its test cleanly) and starts new ones with the new -b. Each new flow is a new TCP connection and starts in slow start."}[mode]
     method_html = f"""<h2 class='page'>3. How this run was tested</h2>
 <p>{how}</p>
 <ul><li><b>Traffic:</b> one TCP connection per algorithm, from the site {'A' if o.get('direction', 'a2b') == 'a2b' else 'B'} host to its peer, started by the portal over SSH: <span class='mono'>{cmd}</span>. There is no <span class='mono'>-P</span>, so each flow is a single stream.</li>
@@ -445,8 +448,8 @@ def build_html(run, lab_version, node_stats, host_info=None, inv=None, configs=N
         tbl_n[0] += 1
         return f"<div class='tbl'>{html_}<div class='cap'><b>Table {tbl_n[0]}.</b> {title}.{(' ' + text.rstrip('.') + '.') if text else ''}</div></div>"
 
-    title = {"compete": "Three Algorithms, One Bottleneck", "solo": "Each Algorithm Alone", "live": "Congestion Control Under Changing Conditions"}[mode]
-    kicker = {"compete": "Flow test · compete", "solo": "Flow test · solo", "live": "Flow test · live"}[mode]
+    title = {"compete": "Three Algorithms, One Bottleneck", "solo": "Each Algorithm Alone", "live": "Each Algorithm Alone, Under Changing Conditions" if seq else "Congestion Control Under Changing Conditions"}[mode]
+    kicker = {"compete": "Flow test · compete", "solo": "Flow test · solo", "live": "Flow test · live, one at a time" if seq else "Flow test · live"}[mode]
     lede = (f"{' vs '.join(ln(a) for a in algos)} across an emulated WAN: {wtxt}" + (f", sender bit rate {br:g} Mbit/s per flow" if br else "") + ".")
     cover = f"""<section class='cover'>
 <div class='top'><div class='kicker'>{kicker}</div><div class='series'>Network lab series · tcp-cc-lab</div></div>
@@ -478,7 +481,7 @@ libvirt/KVM · VyOS · Alpine Linux ({E(uname[0].split()[-1]) if uname else 'Lin
     res_html = res_main + (table(ph_tbl, "Mean throughput and RTT in each phase", "A phase runs from one change to the next; means of the per-second samples.") if ph_tbl else "")
     res_html += "<h3>Per second</h3>" + legend(algos) + "".join(figure(c, t, s_[0].upper() + s_[1:]) for t, s_, c in figs)
     cw = [(a, LABEL[a], [(s_["ts"] - t0, s_["cwnd"] / 1e6) for s_ in per[a] if s_.get("cwnd")]) for a in algos]
-    ana, ana_find = report_analysis.chapter(dict(algos=algos, per=per, wans=wans, mk=mk, phases=phases, states=states, wan0=wan0, res=res, br=br, mode=mode,
+    ana, ana_find = report_analysis.chapter(dict(algos=algos, per=per, wans=wans, mk=mk, phases=phases, states=states, wan0=wan0, res=res, br=br, mode="solo" if seq else mode,
                                                  mtu=mtu, t0=t0, xmax=xmax, figure=figure, table=table, chart=chart, cwnd_series=cw if any(x[2] for x in cw) else None))
     res_html += "<h2 class='sub'>Analysis: what the results mean</h2>" + ana
     find[1:1] = ana_find

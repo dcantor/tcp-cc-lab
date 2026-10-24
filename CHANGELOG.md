@@ -2,6 +2,28 @@
 
 All notable changes to this lab are documented here ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 
+## [0.11.0] - 2026-10-23
+
+### Added
+- **Together / one at a time toggle** on the portal's Flows card, next to a new **Live (until stopped) / Timed**
+  toggle; the two replace the three mode buttons.
+  - Timed + together is the compete test, and timed + one at a time is the solo test, as before.
+  - **New: live, one at a time.** Each chosen algorithm runs alone for the time set ("each for" 30 s – 10 min), in
+    turn, and the run ends after the last. The WAN and bit-rate controls act on the running flow.
+  - A **Next ▸** button moves to the next algorithm early. The Flows card shows which algorithm is running ("now:
+    BBR (2 of 3)"), and the charts mark where each one starts.
+  - While a live test runs, the toggles show how it is running.
+  - API: `options.sequential` and `options.slot_s` on a live run, and `POST /api/live/next`.
+- The PDF report covers one-at-a-time live runs:
+  - its own title, mode and methodology text;
+  - an "X starts" mark for each algorithm;
+  - the change count leaves out the hand-overs, and the phase analysis skips them;
+  - no "Sharing" section, since the bottleneck was never shared.
+
+### Changed
+- In the report's phase analysis, BBR "holds its rate" within 10 % (was 5 %), because its retransmits come out of
+  its throughput.
+
 ## [0.10.0] - 2026-10-23
 
 ### Added

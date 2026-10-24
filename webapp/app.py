@@ -369,7 +369,7 @@ def report(name: str):
 class RunRequest(BaseModel):
     mode: str = Field(..., description="compete | solo | verify | test")
     options: dict = Field(default_factory=dict, description="compete/solo: {duration: s, direction: a2b|b2a, algos: [cubic, bbr, reno], stagger: s, bitrate_mbit}; "
-                          "live: {max_s, direction, algos, bitrate_mbit}; test: {suite}. bitrate_mbit: iperf3 -b per flow, 0 or missing = unlimited")
+                          "live: {max_s, direction, algos, bitrate_mbit, sequential: one algorithm at a time, slot_s: seconds each}; test: {suite}. bitrate_mbit: iperf3 -b per flow, 0 or missing = unlimited")
 
 
 class Run(RunBase):
@@ -380,14 +380,15 @@ class Run(RunBase):
                    "live": "Live test"}
 
     def __init__(self, mode, options=None, resume_of=None):
-        self.result = None; self.node_stats = None; self.ctl = {"stop": False, "bitrate": None}
+        self.result = None; self.node_stats = None; self.ctl = {"stop": False, "bitrate": None, "next": False}
         super().__init__(mode, options, resume_of, runs_dir=RUNS_DIR, cwd=LAB)
         o = self.options
         if mode in FLOW_MODES:
             self.steps[0]["title"] = (f"{self.STEP_TITLES[mode]}: {', '.join(o['algos'])}, {o['duration']} s, "
                                       f"site {'A → B' if o['direction'] == 'a2b' else 'B → A'}" + (f", {o['stagger']} s apart" if o.get("stagger") else ""))
         if mode == "live":
-            self.steps[0]["title"] = f"Live test: {', '.join(o['algos'])} at once, site {'A → B' if o['direction'] == 'a2b' else 'B → A'}, until stopped (at most {o['max_s']} s)"
+            self.steps[0]["title"] = (f"Live test: {', '.join(o['algos'])} one at a time, {o['slot_s']} s each, site {'A → B' if o['direction'] == 'a2b' else 'B → A'}, until stopped"
+                                      if o.get("sequential") else f"Live test: {', '.join(o['algos'])} at once, site {'A → B' if o['direction'] == 'a2b' else 'B → A'}, until stopped (at most {o['max_s']} s)")
         if mode == "test" and o.get("suite"): self.steps[0]["title"] = f"Robot suite {o['suite']}"
 
     def plan(self): return [self.mode]
@@ -411,10 +412,12 @@ class Run(RunBase):
 
     def do_live(self, s):
         """Flows run until stopped; a bit-rate change stops them (SIGINT: iperf3 ends its test cleanly) and starts new ones with the new -b."""
-        o = self.options; hs = C.senders(o["direction"], o["algos"]); t0 = time.time(); end = t0 + o["max_s"]
+        o = self.options; hs_all = C.senders(o["direction"], o["algos"]); t0 = time.time(); end = t0 + o["max_s"]
+        seq = bool(o.get("sequential")); k = 0; hs = hs_all[:1] if seq else hs_all   # hs: the flows running now
+        slot_end = t0 + (o.get("slot_s") or 0)
         self.ctl["bitrate"] = o.get("bitrate_mbit") or 0; segs, sent, last_w = [], {}, None
         def flow(h, br, tries=0):
-            f = C.Flow(h, max(5, int(end - time.time()) + 2), t0, bitrate=f"{br:g}M" if br else None)
+            f = C.Flow(h, max(5, int((slot_end if seq else end) - time.time()) + 2), t0, bitrate=f"{br:g}M" if br else None)
             f.started_at, f.br, f.tries = time.time(), br, tries; f.start(); return f
         def start(br):
             fs = [flow(h, br) for h in hs]
@@ -428,7 +431,8 @@ class Run(RunBase):
                              "mbps": round(sum(x["mbps"] for x in sm) / len(sm), 2) if sm else 0, "retransmits": sum(x["retr"] for x in sm),
                              "rtt_ms": {"min": min(rt, default=0), "mean": round(sum(rt) / len(rt), 2) if rt else 0, "max": max(rt, default=0)},
                              "error": None if "interrupt" in (f.error or "") else f.error})
-        d0 = path_drops(); w0 = wan(fresh=True); self.say("START " + json.dumps({"ts": round(t0, 2), **{k: (w0.get("settings") or {}).get(k) for k in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}, "bitrate_mbit": self.ctl["bitrate"]}))
+        d0 = path_drops(); w0 = wan(fresh=True); self.say("START " + json.dumps({"ts": round(t0, 2), **{k_: (w0.get("settings") or {}).get(k_) for k_ in ("rtt_ms", "rate_mbit", "loss_pct", "buffer_bdp")}, "bitrate_mbit": self.ctl["bitrate"],
+                                                                **({"algo": hs[0]["cc"]} if seq else {})}))
         fs = start(self.ctl["bitrate"]); br = self.ctl["bitrate"]
         def flush(fs):
             for f in fs:
@@ -446,7 +450,11 @@ class Run(RunBase):
                     self.say("WAN " + json.dumps({"ts": round(w["at"], 2), "mbps": round(max(0, d["bytes"] - p["bytes"]) * 8 / dt / 1e6, 1), "drops_s": round(max(0, d["drops"] - p["drops"]) / dt, 1),
                                                   "q_ms": round(d["backlog_bytes"] * 8 / (w["settings"]["rate_mbit"] * 1000), 2), "q_kb": round(d["backlog_bytes"] / 1000, 1)}))
                 last_w = w
-            if self.ctl["stop"] or time.time() >= end or all(not f.is_alive() for f in fs): break
+            if seq and (self.ctl["next"] or time.time() >= slot_end) and k + 1 < len(hs_all):   # the next algorithm's turn
+                self.ctl["next"] = False; stop(fs); flush(fs); k += 1; hs[:] = [hs_all[k]]; slot_end = time.time() + o["slot_s"]
+                self.say("MARK " + json.dumps({"ts": round(time.time(), 2), "algo": hs[0]["cc"]})); fs = start(br); continue
+            if seq and self.ctl["next"]: self.ctl["next"] = False; break   # Next on the last algorithm ends the run
+            if self.ctl["stop"] or time.time() >= end or (seq and time.time() >= slot_end) or all(not f.is_alive() for f in fs): break
             if self.ctl["bitrate"] != br:
                 br = self.ctl["bitrate"]; stop(fs); flush(fs)
                 self.say("MARK " + json.dumps({"ts": round(time.time(), 2), "bitrate_mbit": br})); fs = start(br)
@@ -454,7 +462,8 @@ class Run(RunBase):
         stop(fs); flush(fs)
         self.result = {"mode": "live", "direction": o["direction"], "algos": o["algos"], "wan": w0.get("settings"), "host_mtu": (mtu() or {}).get("host_mtu"),
                        "seconds": round(time.time() - t0, 1), "segments": segs, "path_drops": drops_since(d0)}
-        s["summary"] = f"{self.result['seconds']} s, {len(segs) // max(1, len(hs))} bit-rate segment(s)"
+        self.result["sequential"] = seq
+        s["summary"] = f"{self.result['seconds']} s, " + (f"{k + 1} of {len(hs_all)} algorithms in turn" if seq else f"{len(segs) // max(1, len(hs))} bit-rate segment(s)")
         bad = [g for g in segs if g["error"]]
         if bad: raise RuntimeError("; ".join(f"{g['cc']}: {g['error']}" for g in bad)[:300])
 
@@ -497,6 +506,12 @@ def start_run(req: RunRequest):
         if not o["algos"]: raise HTTPException(422, "options.algos: some of cubic, bbr, reno")
         o["stagger"] = float(o.get("stagger") or 0) if req.mode != "live" else 0
         if not 0 <= o["stagger"] <= 60: raise HTTPException(422, "options.stagger: 0 .. 60 s")
+        if req.mode == "live":   # sequential: one algorithm at a time, slot_s each (Next moves on early)
+            o["sequential"] = bool(o.get("sequential"))
+            if o["sequential"]:
+                o["slot_s"] = int(o.get("slot_s") or 60)
+                if not 10 <= o["slot_s"] <= 600: raise HTTPException(422, "options.slot_s: 10 .. 600 s")
+                o["max_s"] = o["duration"] = o["slot_s"] * len(o["algos"]) + 5 * len(o["algos"])
     if req.mode == "test" and o.get("suite") not in (None, "", *SUITES): raise HTTPException(422, f"options.suite: one of {', '.join(SUITES)}")
     if not all_running(): raise HTTPException(409, "the lab is not (fully) running: power it on from the Lab Hub")
     return registry.start(Run(req.mode, o))
@@ -538,6 +553,13 @@ class Bitrate(BaseModel):
 def live_bitrate(b: Bitrate):
     if not 0 <= b.bitrate_mbit <= BITRATE_MAX: raise HTTPException(422, f"bitrate_mbit: 0 (unlimited) .. {BITRATE_MAX}")
     a = live_run(); a.ctl["bitrate"] = b.bitrate_mbit; return {"id": a.id, "bitrate_mbit": b.bitrate_mbit}
+
+
+@app.post("/api/live/next", tags=["runs"], summary="One-at-a-time live test: end the current algorithm's flow and start the next one's (on the last, ends the run)")
+def live_next():
+    a = live_run()
+    if not a.options.get("sequential"): raise HTTPException(409, "the live test runs its algorithms together")
+    a.ctl["next"] = True; return {"id": a.id}
 
 
 @app.post("/api/live/stop", tags=["runs"], summary="Stop the live test (its flows end cleanly and the run finishes)")
